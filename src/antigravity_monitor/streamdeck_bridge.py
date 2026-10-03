@@ -26,6 +26,11 @@ except ImportError:
 
 from src.antigravity_monitor.collector import DataCollector
 from src.antigravity_monitor.image_generator import generate_key_svg, svg_to_data_uri
+from src.antigravity_monitor.image_generator import (
+    generate_hub_rocket_svg,
+    generate_key_svg,
+    svg_to_data_uri,
+)
 from src.antigravity_monitor.session_page_manager import (
     KeyRenderData,
     SessionPageManager,
@@ -178,6 +183,16 @@ class StreamDeckBridge:
             bg_color=key_data.bg_color,
             is_active=is_active,
         )
+        if key_data.key_id == "summary_hub":
+            svg = generate_hub_rocket_svg(status=key_data.status)
+        else:
+            svg = generate_key_svg(
+                title=key_data.title,
+                subtitle=key_data.subtitle,
+                status_label=key_data.status,
+                bg_color=key_data.bg_color,
+                is_active=is_active,
+            )
         data_uri = svg_to_data_uri(svg)
 
         set_image_payload = {

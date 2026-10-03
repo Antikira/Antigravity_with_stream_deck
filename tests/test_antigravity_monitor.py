@@ -11,6 +11,11 @@ from unittest.mock import patch
 import pytest
 
 from src.antigravity_monitor.image_generator import generate_key_svg, svg_to_data_uri
+from src.antigravity_monitor.image_generator import (
+    generate_hub_rocket_svg,
+    generate_key_svg,
+    svg_to_data_uri,
+)
 from src.antigravity_monitor.quota_reader import (
     QuotaReader,
     _format_tokens,
@@ -380,6 +385,8 @@ def test_summary_hub_key_priority(mock_antigravity_env: Path):
     assert hub.status == "waiting"
     assert hub.bg_color == "#E53935"
     assert "承認待ち" in hub.title
+    assert hub.title == ""
+    assert hub.subtitle == "WAITING"
 
 
 def test_ignore_preexisting_done_filtering(mock_antigravity_env: Path):
@@ -415,6 +422,22 @@ def test_image_generator():
 
     data_uri = svg_to_data_uri(svg)
     assert data_uri.startswith("data:image/svg+xml;charset=utf8,")
+
+
+def test_hub_rocket_svg_generator():
+    # Test all 4 states
+    for status, expected_label in [
+        ("working", "WORKING"),
+        ("done", "DONE"),
+        ("waiting", "WAITING"),
+        ("empty", "READY"),
+        ("idle", "READY"),
+    ]:
+        svg = generate_hub_rocket_svg(status)
+        assert "<svg" in svg
+        assert expected_label in svg
+        data_uri = svg_to_data_uri(svg)
+        assert data_uri.startswith("data:image/svg+xml;charset=utf8,")
 
 
 def test_window_focus_helpers():
@@ -620,6 +643,8 @@ def test_permission_turns_hub_and_slots_red(tmp_path: Path):
     assert hub_key.status == "waiting"
     assert hub_key.bg_color == "#E53935"
     assert "承認待ち (1)" in hub_key.title
+    assert hub_key.title == ""
+    assert hub_key.subtitle == "WAITING"
 
     # Slot 0 key must be Red and display [承認待]
     slot_key = next(k for k in all_keys if k.key_id == "session_slot_0")

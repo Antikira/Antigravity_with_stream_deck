@@ -243,20 +243,28 @@ class SessionPageManager:
             bg_color = self.STATUS_COLORS[SessionStatus.WAITING_FOR_APPROVAL]
             short = primary.short_title if primary else ""
             title = f"承認待ち ({waiting_count})\n{short}"
+            title = ""
+            subtitle = "WAITING"
         elif working_count > 0:
             status = "working"
             bg_color = self.STATUS_COLORS[SessionStatus.WORKING]
             short = primary.short_title if primary else ""
             title = f"作業中 ({working_count})\n{short}"
+            title = ""
+            subtitle = "WORKING"
         elif done_count > 0:
             status = "done"
             bg_color = self.STATUS_COLORS[SessionStatus.DONE]
             short = primary.short_title if primary else ""
             title = f"完了 ({done_count})\n{short}"
+            title = ""
+            subtitle = "DONE"
         else:
             status = "empty"
             bg_color = "#263238"
             title = "Antigravity\n(待機中)"
+            title = ""
+            subtitle = "READY"
 
         payload: dict[str, Any] = {"action": "activate_primary"}
         if primary:
