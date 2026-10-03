@@ -1,3 +1,17 @@
 {
-  "hub_done_timeout_seconds": 300
+  "hub_done_timeout_seconds": 120.0,
+  "sort_criteria": [
+    {
+      "field": "status",
+      "ascending": false
+    },
+    {
+      "field": "updated_at",
+      "ascending": false
+    },
+    {
+      "field": "title",
+      "ascending": false
+    }
+  ]
 }

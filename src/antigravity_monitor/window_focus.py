@@ -21,6 +21,7 @@ DESKTOP_ALL_ACCESS = 0x01FF
 
 if sys.platform == "win32":
     from ctypes import wintypes
+
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     LPARAM = ctypes.c_ssize_t

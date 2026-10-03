@@ -30,11 +30,12 @@ from src.antigravity_monitor.image_generator import (
     generate_key_svg,
     svg_to_data_uri,
 )
-from src.antigravity_monitor.monitor_config import MonitorConfig, load_monitor_config
 from src.antigravity_monitor.monitor_config import (
     MonitorConfig,
+    _validate_sort_criteria,
     _validate_timeout,
     load_monitor_config,
+    save_monitor_config,
 )
 from src.antigravity_monitor.session_page_manager import (
     KeyRenderData,
@@ -62,19 +63,19 @@ class StreamDeckBridge:
         state_store: StateStore | None = None,
         collector: DataCollector | None = None,
         config: MonitorConfig | None = None,
+        config_path: Path | str | None = None,
     ) -> None:
         self.port = port
         self.plugin_uuid = plugin_uuid
         self.register_event = register_event
         self.info = info or {}
-        self.config = config or load_monitor_config()
+        self.config_path = config_path
+        self.config = config or load_monitor_config(config_path=self.config_path)
 
         # Shared StateStore and dedicated background collector
         self.state_store = state_store or StateStore()
         self.collector = collector or DataCollector(state_store=self.state_store)
-        self.page_manager = SessionPageManager(
-            state_store=self.state_store, config=self.config
-        )
+        self.page_manager = SessionPageManager(state_store=self.state_store, config=self.config)
 
         self.ws: Any = None
         # Track active contexts: context -> dict(action, coordinates, settings)
@@ -230,10 +231,23 @@ class StreamDeckBridge:
         """Apply dynamic settings received from Stream Deck."""
         if not isinstance(settings, dict):
             return
+        updated_global = False
         if "hub_done_timeout_seconds" in settings:
             new_timeout = _validate_timeout(settings.get("hub_done_timeout_seconds"))
             self.config.hub_done_timeout_seconds = new_timeout
             logger.info("Updated hub_done_timeout_seconds from settings: %s", new_timeout)
+
+        if "sort_criteria" in settings:
+            new_criteria = _validate_sort_criteria(settings.get("sort_criteria"))
+            self.config.sort_criteria = new_criteria
+            updated_global = True
+            logger.info("Updated sort_criteria from settings: %s", new_criteria)
+
+        if updated_global:
+            try:
+                save_monitor_config(self.config, config_path=self.config_path)
+            except Exception as e:
+                logger.warning("Failed to save monitor config: %s", e)
 
     async def handle_streamdeck_event(self, data: dict[str, Any]) -> None:
         """Handle incoming Stream Deck event."""
@@ -249,7 +263,6 @@ class StreamDeckBridge:
             self.active_contexts[context] = {
                 "action": action,
                 "coordinates": coords,
-                "settings": payload.get("settings", {}),
                 "settings": settings,
             }
             self._rendered_key_cache.pop(context, None)
@@ -264,13 +277,11 @@ class StreamDeckBridge:
             self._apply_settings(settings)
             if context in self.active_contexts:
                 self.active_contexts[context]["settings"] = settings
-            self._rendered_key_cache.pop(context, None)
+            self._rendered_key_cache.clear()
             await self.update_all_keys(force=True)
 
         elif event == "keyDown":
-            await self.handle_key_down(
-                context, action, coords, payload.get("settings", {})
-            )
+            await self.handle_key_down(context, action, coords, payload.get("settings", {}))
 
     async def handle_key_down(
         self,
@@ -284,9 +295,7 @@ class StreamDeckBridge:
         row = coords.get("row", -1)
         suffix = action.split(".")[-1]
 
-        logger.info(
-            "Key down: action=%s, suffix=%s, coords=(%s, %s)", action, suffix, col, row
-        )
+        logger.info("Key down: action=%s, suffix=%s, coords=(%s, %s)", action, suffix, col, row)
 
         # 1. Hub: Focus the primary (highest-priority) session window
         if suffix == "summary_hub":
@@ -324,10 +333,7 @@ class StreamDeckBridge:
                 # If 1-based (session_slot_1..5), map to 0..4
                 slot_index = num - 1 if num in (1, 2, 3, 4, 5) else num
 
-        if (
-            slot_index is not None
-            and 0 <= slot_index < self.page_manager.items_per_page
-        ):
+        if slot_index is not None and 0 <= slot_index < self.page_manager.items_per_page:
             session = self.page_manager.get_session_by_slot(slot_index)
             if session:
                 logger.info(
@@ -565,9 +571,7 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--server", action="store_true", help="Run interactive simulator HTTP server"
     )
-    parser.add_argument(
-        "--server-port", type=int, default=18500, help="Simulator server port"
-    )
+    parser.add_argument("--server-port", type=int, default=18500, help="Simulator server port")
     return parser.parse_args()
 
 

@@ -19,12 +19,12 @@
     .sdpi-wrapper {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 16px;
     }
-    .sdpi-item {
+    .sdpi-section {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
     }
     .sdpi-heading {
       font-weight: 600;
@@ -34,7 +34,11 @@
       letter-spacing: 0.5px;
       border-bottom: 1px solid #444;
       padding-bottom: 4px;
-      margin-bottom: 4px;
+    }
+    .sdpi-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
     .sdpi-label {
       font-weight: 500;
@@ -45,17 +49,26 @@
       align-items: center;
       gap: 8px;
     }
-    input[type="number"] {
+    input[type="number"], select {
       background-color: #3b3b3b;
       border: 1px solid #555555;
       color: #ffffff;
-      padding: 6px 8px;
+      padding: 5px 8px;
       border-radius: 4px;
       outline: none;
-      width: 100px;
-      font-size: 13px;
+      font-size: 12px;
     }
-    input[type="number"]:focus {
+    input[type="number"] {
+      width: 90px;
+    }
+    select {
+      flex: 1;
+      cursor: pointer;
+    }
+    select.order-select {
+      flex: 0 0 90px;
+    }
+    input:focus, select:focus {
       border-color: #2979ff;
     }
     .sdpi-unit {
@@ -77,18 +90,78 @@
 </head>
 <body>
   <div class="sdpi-wrapper">
-    <div class="sdpi-heading">Hub Settings</div>
-    
-    <div class="sdpi-item">
-      <label class="sdpi-label" for="timeoutInput">Ready 待機時間 (完了から待機への遷移)</label>
-      <div class="sdpi-input-row">
-        <input type="number" id="timeoutInput" min="0" step="10" value="300" />
-        <span class="sdpi-unit">秒</span>
+    <!-- ハブ個別設定 -->
+    <div class="sdpi-section">
+      <div class="sdpi-heading">ハブ個別設定</div>
+      <div class="sdpi-item">
+        <label class="sdpi-label" for="timeoutInput">Ready 待機時間 (完了から待機への遷移)</label>
+        <div class="sdpi-input-row">
+          <input type="number" id="timeoutInput" min="0" step="10" value="300" />
+          <span class="sdpi-unit">秒</span>
+        </div>
+        <div class="sdpi-description">
+          セッション完了 (DONE) 後、ハブの警告灯が待機 (READY) に戻るまでの時間です。<br>
+          ※この設定はハブ固有のストップ時間です。(既定: 300秒)
+        </div>
       </div>
+    </div>
+
+    <!-- 複数ブロック協働ソート設定 -->
+    <div class="sdpi-section">
+      <div class="sdpi-heading">協働ソート設定 (全ブロック共通)</div>
       <div class="sdpi-description">
-        セッション完了 (DONE) 後、ハブの警告灯が待機 (READY) に戻るまでの時間を指定します。<br>
-        (デフォルト: 300秒 / 5分)
+        セッション一覧の多段階ソート順序を設定します。<br>
+        ※Hubは状態(Waiting > Working > Done)が最優先され、同一状態内の順位決定に下記が適用されます。
       </div>
+
+      <!-- 第1優先 -->
+      <div class="sdpi-item">
+        <label class="sdpi-label">第1優先キー</label>
+        <div class="sdpi-input-row">
+          <select id="field1">
+            <option value="status">状態 (Waiting > Working > Done)</option>
+            <option value="updated_at">最終更新日時</option>
+            <option value="title">セッションタイトル</option>
+          </select>
+          <select id="order1" class="order-select">
+            <option value="desc">降順 / 優先</option>
+            <option value="asc">昇順 / 逆順</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 第2優先 -->
+      <div class="sdpi-item">
+        <label class="sdpi-label">第2優先キー (同率時のタイブレーク)</label>
+        <div class="sdpi-input-row">
+          <select id="field2">
+            <option value="updated_at">最終更新日時</option>
+            <option value="status">状態 (Waiting > Working > Done)</option>
+            <option value="title">セッションタイトル</option>
+          </select>
+          <select id="order2" class="order-select">
+            <option value="desc">降順 / 新しい順</option>
+            <option value="asc">昇順 / 古い順</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 第3優先 -->
+      <div class="sdpi-item">
+        <label class="sdpi-label">第3優先キー</label>
+        <div class="sdpi-input-row">
+          <select id="field3">
+            <option value="title">セッションタイトル</option>
+            <option value="updated_at">最終更新日時</option>
+            <option value="status">状態 (Waiting > Working > Done)</option>
+          </select>
+          <select id="order3" class="order-select">
+            <option value="asc">昇順 (A-Z / 五十音)</option>
+            <option value="desc">降順 (Z-A)</option>
+          </select>
+        </div>
+      </div>
+
       <div id="statusMessage" class="sdpi-status"></div>
     </div>
   </div>
@@ -97,6 +170,40 @@
     var websocket = null;
     var pluginUUID = null;
     var actionInfo = null;
+
+    function applySortCriteriaToUI(criteria) {
+      if (!Array.isArray(criteria) || criteria.length === 0) return;
+      if (criteria[0]) {
+        document.getElementById("field1").value = criteria[0].field;
+        document.getElementById("order1").value = criteria[0].ascending ? "asc" : "desc";
+      }
+      if (criteria[1]) {
+        document.getElementById("field2").value = criteria[1].field;
+        document.getElementById("order2").value = criteria[1].ascending ? "asc" : "desc";
+      }
+      if (criteria[2]) {
+        document.getElementById("field3").value = criteria[2].field;
+        document.getElementById("order3").value = criteria[2].ascending ? "asc" : "desc";
+      }
+    }
+
+    function getSortCriteriaFromUI() {
+      return [
+        { field: document.getElementById("field1").value, ascending: document.getElementById("order1").value === "asc" },
+        { field: document.getElementById("field2").value, ascending: document.getElementById("order2").value === "asc" },
+        { field: document.getElementById("field3").value, ascending: document.getElementById("order3").value === "asc" }
+      ];
+    }
+
+    function showStatus(msg) {
+      var statusElem = document.getElementById("statusMessage");
+      if (statusElem) {
+        statusElem.textContent = msg;
+        setTimeout(function () {
+          statusElem.textContent = "";
+        }, 2500);
+      }
+    }
 
     function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo, inActionInfo) {
       pluginUUID = inPluginUUID;
@@ -107,6 +214,9 @@
           var settings = actionInfo.payload && actionInfo.payload.settings ? actionInfo.payload.settings : {};
           if (settings.hub_done_timeout_seconds !== undefined && settings.hub_done_timeout_seconds !== null) {
             document.getElementById("timeoutInput").value = settings.hub_done_timeout_seconds;
+          }
+          if (settings.sort_criteria) {
+            applySortCriteriaToUI(settings.sort_criteria);
           }
         } catch (e) {
           console.error("Failed to parse actionInfo:", e);
@@ -121,6 +231,12 @@
           uuid: inPluginUUID
         };
         websocket.send(JSON.stringify(registerPayload));
+
+        var getGlobalPayload = {
+          event: "getGlobalSettings",
+          context: inPluginUUID
+        };
+        websocket.send(JSON.stringify(getGlobalPayload));
       };
 
       websocket.onmessage = function (evt) {
@@ -131,6 +247,11 @@
             if (newSettings.hub_done_timeout_seconds !== undefined) {
               document.getElementById("timeoutInput").value = newSettings.hub_done_timeout_seconds;
             }
+          } else if (jsonObj.event === "didReceiveGlobalSettings") {
+            var gSettings = jsonObj.payload && jsonObj.payload.settings ? jsonObj.payload.settings : {};
+            if (gSettings.sort_criteria) {
+              applySortCriteriaToUI(gSettings.sort_criteria);
+            }
           }
         } catch (e) {
           console.error("Error processing websocket message:", e);
@@ -138,10 +259,8 @@
       };
     }
 
-    function saveSettings() {
-      if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-        return;
-      }
+    function saveHubTimeout() {
+      if (!websocket || websocket.readyState !== WebSocket.OPEN) return;
       var input = document.getElementById("timeoutInput");
       var val = parseFloat(input.value);
       if (isNaN(val) || val < 0) {
@@ -152,23 +271,33 @@
       var currentSettings = (actionInfo && actionInfo.payload && actionInfo.payload.settings) || {};
       currentSettings.hub_done_timeout_seconds = val;
 
-      var json = {
+      websocket.send(JSON.stringify({
         event: "setSettings",
         context: pluginUUID,
         payload: currentSettings
-      };
-      websocket.send(JSON.stringify(json));
+      }));
 
-      var statusElem = document.getElementById("statusMessage");
-      if (statusElem) {
-        statusElem.textContent = "設定を保存しました (" + val + " 秒)";
-        setTimeout(function () {
-          statusElem.textContent = "";
-        }, 2000);
-      }
+      showStatus("ハブ待機時間を保存しました (" + val + " 秒)");
     }
 
-    document.getElementById("timeoutInput").addEventListener("change", saveSettings);
+    function saveGlobalSortCriteria() {
+      if (!websocket || websocket.readyState !== WebSocket.OPEN) return;
+      var criteria = getSortCriteriaFromUI();
+
+      // Send to global settings so all collaborative blocks share the same configuration
+      websocket.send(JSON.stringify({
+        event: "setGlobalSettings",
+        context: pluginUUID,
+        payload: { sort_criteria: criteria }
+      }));
+
+      showStatus("ソート設定を全ブロックに適用・保存しました");
+    }
+
+    document.getElementById("timeoutInput").addEventListener("change", saveHubTimeout);
+    ["field1", "order1", "field2", "order2", "field3", "order3"].forEach(function(id) {
+      document.getElementById(id).addEventListener("change", saveGlobalSortCriteria);
+    });
   </script>
 </body>
 </html>
