@@ -1,9 +1,9 @@
 {
   "Author": "Antigravity User",
   "Description": "Monitor and activate Antigravity AI sessions and rate limits on Stream Deck",
-  "Name": "Antigravity Monitor",
+  "Name": "Antikitia",
   "Icon": "Images/pluginIcon",
-  "URL": "https://github.com",
+  "URL": "https://github.com/Antikira/Antigravity_with_stream_deck",
   "Version": "1.2.0",
   "SDKVersion": 2,
   "Software": {
