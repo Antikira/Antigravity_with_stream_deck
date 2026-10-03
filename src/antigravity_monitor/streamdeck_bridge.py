@@ -335,12 +335,43 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
 
     def do_POST(self) -> None:
-        """Handle POST requests."""
+        """Handle POST requests with security validations."""
+        # 1. CSRF validation: Validate Host / Origin headers
+        host = self.headers.get("Host", "")
+        # Remove port if present
+        host_name = host.split(":")[0] if ":" in host else host
+        if host_name not in ("127.0.0.1", "localhost"):
+            self.send_error(403, "Forbidden: Invalid Host")
+            return
+
+        origin = self.headers.get("Origin", "")
+        if origin:
+            parsed_origin = urllib.parse.urlparse(origin)
+            if parsed_origin.hostname not in ("127.0.0.1", "localhost"):
+                self.send_error(403, "Forbidden: Invalid Origin")
+                return
+
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/press":
+            # 2. CSRF / Type validation
+            content_type = self.headers.get("Content-Type", "")
+            if not content_type.startswith("application/json"):
+                self.send_error(415, "Unsupported Media Type")
+                return
+
+            # 3. DoS validation: Limit payload size to 4KB
             content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length).decode("utf-8")
-            data = json.loads(body) if body else {}
+            if content_length > 4096:
+                self.send_error(413, "Payload Too Large")
+                return
+
+            try:
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body) if body else {}
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self.send_error(400, "Bad Request: Invalid JSON")
+                return
+
             self.handle_api_press(data)
         else:
             self.send_error(404, "Not Found")
@@ -425,15 +456,20 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
                 action_result["session"] = primary.title
                 action_result["focused"] = focused
         elif key_id.startswith("session_slot_"):
-            slot_idx = int(key_id.replace("session_slot_", ""))
-            session = mgr.get_session_by_slot(slot_idx)
-            if session:
-                focused = WindowFocusManager.focus_session(
-                    workspace_uris=session.workspace_uris,
-                    title=session.title,
-                )
-                action_result["session"] = session.title
-                action_result["focused"] = focused
+            slot_part = key_id.replace("session_slot_", "")
+            if slot_part.isdigit():
+                slot_idx = int(slot_part)
+                session = mgr.get_session_by_slot(slot_idx)
+                if session:
+                    focused = WindowFocusManager.focus_session(
+                        workspace_uris=session.workspace_uris,
+                        title=session.title,
+                    )
+                    action_result["session"] = session.title
+                    action_result["focused"] = focused
+            else:
+                action_result["status"] = "error"
+                action_result["info"] = "Invalid session slot ID"
         elif key_id.startswith("quota_"):
             if self.bridge and self.bridge.collector:
                 self.bridge.collector.request_quota_refresh()
