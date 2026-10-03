@@ -31,6 +31,11 @@ from src.antigravity_monitor.image_generator import (
     svg_to_data_uri,
 )
 from src.antigravity_monitor.monitor_config import MonitorConfig, load_monitor_config
+from src.antigravity_monitor.monitor_config import (
+    MonitorConfig,
+    _validate_timeout,
+    load_monitor_config,
+)
 from src.antigravity_monitor.session_page_manager import (
     KeyRenderData,
     SessionPageManager,
@@ -221,6 +226,15 @@ class StreamDeckBridge:
 
         self._rendered_key_cache[context] = cache_key
 
+    def _apply_settings(self, settings: dict[str, Any]) -> None:
+        """Apply dynamic settings received from Stream Deck."""
+        if not isinstance(settings, dict):
+            return
+        if "hub_done_timeout_seconds" in settings:
+            new_timeout = _validate_timeout(settings.get("hub_done_timeout_seconds"))
+            self.config.hub_done_timeout_seconds = new_timeout
+            logger.info("Updated hub_done_timeout_seconds from settings: %s", new_timeout)
+
     async def handle_streamdeck_event(self, data: dict[str, Any]) -> None:
         """Handle incoming Stream Deck event."""
         event = data.get("event")
@@ -230,10 +244,13 @@ class StreamDeckBridge:
         coords = payload.get("coordinates", {})
 
         if event == "willAppear":
+            settings = payload.get("settings", {})
+            self._apply_settings(settings)
             self.active_contexts[context] = {
                 "action": action,
                 "coordinates": coords,
                 "settings": payload.get("settings", {}),
+                "settings": settings,
             }
             self._rendered_key_cache.pop(context, None)
             await self.update_all_keys(force=True)
@@ -241,6 +258,14 @@ class StreamDeckBridge:
         elif event == "willDisappear":
             self.active_contexts.pop(context, None)
             self._rendered_key_cache.pop(context, None)
+
+        elif event in ("didReceiveSettings", "didReceiveGlobalSettings"):
+            settings = payload.get("settings", {})
+            self._apply_settings(settings)
+            if context in self.active_contexts:
+                self.active_contexts[context]["settings"] = settings
+            self._rendered_key_cache.pop(context, None)
+            await self.update_all_keys(force=True)
 
         elif event == "keyDown":
             await self.handle_key_down(

@@ -956,3 +956,60 @@ def test_hub_done_legacy_preserves_done_status():
     assert hub_key.subtitle == "DONE"
     assert hub_key.bg_color == "#43A047"
 
+
+def test_streamdeck_bridge_settings_events_update_config():
+    """Verify that willAppear and didReceiveSettings update hub_done_timeout_seconds dynamically."""
+    import asyncio
+
+    from src.antigravity_monitor.streamdeck_bridge import StreamDeckBridge
+
+    async def _test_body():
+        bridge = StreamDeckBridge()
+        # Default is 300.0
+        assert bridge.config.hub_done_timeout_seconds == 300.0
+
+        # 1. willAppear event with custom settings
+        will_appear_data = {
+            "event": "willAppear",
+            "action": "com.user.antigravity.summary_hub",
+            "context": "ctx_hub_1",
+            "payload": {
+                "coordinates": {"column": 0, "row": 0},
+                "settings": {"hub_done_timeout_seconds": 120},
+            },
+        }
+        await bridge.handle_streamdeck_event(will_appear_data)
+        assert bridge.config.hub_done_timeout_seconds == 120.0
+        assert bridge.active_contexts["ctx_hub_1"]["settings"] == {"hub_done_timeout_seconds": 120}
+
+        # 2. didReceiveSettings event updating timeout to 60s
+        did_receive_data = {
+            "event": "didReceiveSettings",
+            "action": "com.user.antigravity.summary_hub",
+            "context": "ctx_hub_1",
+            "payload": {
+                "coordinates": {"column": 0, "row": 0},
+                "settings": {"hub_done_timeout_seconds": 60},
+            },
+        }
+        await bridge.handle_streamdeck_event(did_receive_data)
+        assert bridge.config.hub_done_timeout_seconds == 60.0
+        assert bridge.active_contexts["ctx_hub_1"]["settings"] == {"hub_done_timeout_seconds": 60}
+
+        # 3. didReceiveSettings with invalid/negative value -> fallback to None (legacy disabled)
+        did_receive_invalid = {
+            "event": "didReceiveSettings",
+            "action": "com.user.antigravity.summary_hub",
+            "context": "ctx_hub_1",
+            "payload": {
+                "coordinates": {"column": 0, "row": 0},
+                "settings": {"hub_done_timeout_seconds": -1},
+            },
+        }
+        await bridge.handle_streamdeck_event(did_receive_invalid)
+        assert bridge.config.hub_done_timeout_seconds is None
+
+    asyncio.run(_test_body())
+
+
+
