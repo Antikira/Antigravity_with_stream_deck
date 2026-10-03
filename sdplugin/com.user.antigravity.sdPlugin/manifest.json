@@ -44,6 +44,7 @@
           "FontSize": "11"
         }
       ],
+      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
@@ -58,6 +59,7 @@
           "FontSize": "11"
         }
       ],
+      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
@@ -72,6 +74,7 @@
           "FontSize": "11"
         }
       ],
+      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
@@ -86,6 +89,7 @@
           "FontSize": "11"
         }
       ],
+      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
@@ -100,6 +104,7 @@
           "FontSize": "11"
         }
       ],
+      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {

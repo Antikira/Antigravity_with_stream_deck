@@ -39,11 +39,13 @@ def default_sort_criteria() -> list[SortCriterion]:
 class MonitorConfig:
     """Configuration settings for Antigravity Session Monitor."""
 
+    # --- Hub-specific settings ---
     # Timeout in seconds to switch summary hub from DONE to READY/待機.
-    # If >= 0 (positive or zero), hub switches to READY after this duration.
-    # If None or negative (or invalid), legacy behavior is preserved (stays DONE).
     hub_done_timeout_seconds: float | None = DEFAULT_HUB_DONE_TIMEOUT_SECONDS
+    # Hub-specific sort criteria for determining primary session / warning light.
+    hub_sort_criteria: list[SortCriterion] = field(default_factory=default_sort_criteria)
 
+    # --- Collaborative global settings (Session slots, Pagination, etc.) ---
     # Multi-level sort criteria for ordering sessions across all collaborative blocks.
     sort_criteria: list[SortCriterion] = field(default_factory=default_sort_criteria)
 
@@ -116,6 +118,9 @@ def save_monitor_config(
 
     data = {
         "hub_done_timeout_seconds": config.hub_done_timeout_seconds,
+        "hub_sort_criteria": [
+            {"field": c.field, "ascending": c.ascending} for c in config.hub_sort_criteria
+        ],
         "sort_criteria": [
             {"field": c.field, "ascending": c.ascending} for c in config.sort_criteria
         ],
@@ -142,6 +147,7 @@ def load_monitor_config(config_path: Path | str | None = None) -> MonitorConfig:
         logger.debug("Config file not found in %s, using defaults.", candidate_paths)
         return MonitorConfig(
             hub_done_timeout_seconds=DEFAULT_HUB_DONE_TIMEOUT_SECONDS,
+            hub_sort_criteria=default_sort_criteria(),
             sort_criteria=default_sort_criteria(),
         )
 
@@ -152,6 +158,7 @@ def load_monitor_config(config_path: Path | str | None = None) -> MonitorConfig:
             logger.warning("Config root must be a JSON object: %s", target_path)
             return MonitorConfig(
                 hub_done_timeout_seconds=DEFAULT_HUB_DONE_TIMEOUT_SECONDS,
+                hub_sort_criteria=default_sort_criteria(),
                 sort_criteria=default_sort_criteria(),
             )
 
@@ -160,6 +167,11 @@ def load_monitor_config(config_path: Path | str | None = None) -> MonitorConfig:
         else:
             timeout_val = DEFAULT_HUB_DONE_TIMEOUT_SECONDS
 
+        if "hub_sort_criteria" in raw_data:
+            hub_sort_val = _validate_sort_criteria(raw_data["hub_sort_criteria"])
+        else:
+            hub_sort_val = default_sort_criteria()
+
         if "sort_criteria" in raw_data:
             sort_val = _validate_sort_criteria(raw_data["sort_criteria"])
         else:
@@ -167,11 +179,13 @@ def load_monitor_config(config_path: Path | str | None = None) -> MonitorConfig:
 
         return MonitorConfig(
             hub_done_timeout_seconds=timeout_val,
+            hub_sort_criteria=hub_sort_val,
             sort_criteria=sort_val,
         )
     except Exception as exc:
         logger.warning("Failed to load config from %s: %s, using defaults.", target_path, exc)
         return MonitorConfig(
             hub_done_timeout_seconds=DEFAULT_HUB_DONE_TIMEOUT_SECONDS,
+            hub_sort_criteria=default_sort_criteria(),
             sort_criteria=default_sort_criteria(),
         )

@@ -153,11 +153,15 @@ class SessionPageManager:
         self._cached_sessions: dict[str, SessionInfo] = {}
         self._cached_quotas: dict[str, QuotaInfo] = {}
 
-    def sort_sessions(self, sessions: list[SessionInfo]) -> list[SessionInfo]:
-        """Sort sessions according to configured sort_criteria."""
-        criteria = self.config.sort_criteria
+    def sort_sessions(
+        self,
+        sessions: list[SessionInfo],
+        criteria: list[SortCriterion] | None = None,
+    ) -> list[SessionInfo]:
+        """Sort sessions according to specified or configured sort_criteria."""
+        active_criteria = criteria if criteria is not None else self.config.sort_criteria
         res = list(sessions)
-        res.sort(key=cmp_to_key(lambda a, b: _compare_sessions(a, b, criteria)))
+        res.sort(key=cmp_to_key(lambda a, b: _compare_sessions(a, b, active_criteria)))
         return res
 
     # ------------------------------------------------------------------
@@ -225,7 +229,7 @@ class SessionPageManager:
             else:
                 self._cached_quotas = self.quota_reader.get_cached_stats()
 
-        # Sort tracked sessions according to criteria
+        # Sort tracked sessions according to global collaborative criteria
         active_sessions = [
             self._cached_sessions[cid]
             for cid in self._tracked_session_ids
@@ -268,7 +272,7 @@ class SessionPageManager:
         return None
 
     def get_primary_session(self) -> SessionInfo | None:
-        """Find the highest-priority session across all tracked sessions."""
+        """Find the highest-priority session across all tracked sessions using hub_sort_criteria."""
         all_sessions = [
             self._cached_sessions[cid]
             for cid in self._tracked_session_ids
@@ -277,15 +281,18 @@ class SessionPageManager:
         if not all_sessions:
             return None
 
-        waiting = [s for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL]
+        # Hub evaluates sessions using its own hub_sort_criteria
+        hub_ordered = self.sort_sessions(all_sessions, criteria=self.config.hub_sort_criteria)
+
+        waiting = [s for s in hub_ordered if s.status == SessionStatus.WAITING_FOR_APPROVAL]
         if waiting:
             return waiting[0]
 
-        working = [s for s in all_sessions if s.status == SessionStatus.WORKING]
+        working = [s for s in hub_ordered if s.status == SessionStatus.WORKING]
         if working:
             return working[0]
 
-        return all_sessions[0]
+        return hub_ordered[0]
 
     # ------------------------------------------------------------------
     # Key Builders

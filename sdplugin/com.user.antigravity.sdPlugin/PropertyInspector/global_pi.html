@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Antigravity Hub Settings</title>
+  <title>Antigravity Session Slot Settings</title>
   <style>
     * {
       box-sizing: border-box;
@@ -49,7 +49,7 @@
       align-items: center;
       gap: 8px;
     }
-    input[type="number"], select {
+    select {
       background-color: #3b3b3b;
       border: 1px solid #555555;
       color: #ffffff;
@@ -57,23 +57,14 @@
       border-radius: 4px;
       outline: none;
       font-size: 12px;
-    }
-    input[type="number"] {
-      width: 90px;
-    }
-    select {
       flex: 1;
       cursor: pointer;
     }
     select.order-select {
       flex: 0 0 90px;
     }
-    input:focus, select:focus {
+    select:focus {
       border-color: #2979ff;
-    }
-    .sdpi-unit {
-      color: #aaaaaa;
-      font-size: 12px;
     }
     .sdpi-description {
       font-size: 11px;
@@ -90,28 +81,10 @@
 </head>
 <body>
   <div class="sdpi-wrapper">
-    <!-- Hub個別設定: 待機時間 -->
     <div class="sdpi-section">
-      <div class="sdpi-heading">Hub自体の設定</div>
-      <div class="sdpi-item">
-        <label class="sdpi-label" for="timeoutInput">Ready 待機時間 (完了から待機への遷移)</label>
-        <div class="sdpi-input-row">
-          <input type="number" id="timeoutInput" min="0" step="10" value="300" />
-          <span class="sdpi-unit">秒</span>
-        </div>
-        <div class="sdpi-description">
-          セッション完了 (DONE) 後、ハブの警告灯が待機 (READY) に戻るまでの時間です。<br>
-          (既定: 300秒)
-        </div>
-      </div>
-    </div>
-
-    <!-- Hub個別設定: 警告灯/最優先セッション選定用ソート順 -->
-    <div class="sdpi-section">
-      <div class="sdpi-heading">Hub独自ソート順 (最優先セッション選定)</div>
+      <div class="sdpi-heading">セッションスロット一覧のソート設定</div>
       <div class="sdpi-description">
-        警告灯の点灯およびタップ時にフォーカスするセッションを決定する順序です。<br>
-        ※状態(Waiting > Working > Done)が最優先され、同一状態内での選定に下記が適用されます。
+        Session 1〜5スロットおよびページ送り（全ブロック共通）で一覧表示するセッションの並び順を設定します。
       </div>
 
       <!-- 第1優先 -->
@@ -169,7 +142,6 @@
   <script>
     var websocket = null;
     var pluginUUID = null;
-    var actionInfo = null;
 
     function applySortCriteriaToUI(criteria) {
       if (!Array.isArray(criteria) || criteria.length === 0) return;
@@ -208,21 +180,6 @@
     function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo, inActionInfo) {
       pluginUUID = inPluginUUID;
 
-      if (inActionInfo) {
-        try {
-          actionInfo = JSON.parse(inActionInfo);
-          var settings = actionInfo.payload && actionInfo.payload.settings ? actionInfo.payload.settings : {};
-          if (settings.hub_done_timeout_seconds !== undefined && settings.hub_done_timeout_seconds !== null) {
-            document.getElementById("timeoutInput").value = settings.hub_done_timeout_seconds;
-          }
-          if (settings.hub_sort_criteria) {
-            applySortCriteriaToUI(settings.hub_sort_criteria);
-          }
-        } catch (e) {
-          console.error("Failed to parse actionInfo:", e);
-        }
-      }
-
       websocket = new WebSocket("ws://127.0.0.1:" + inPort);
 
       websocket.onopen = function () {
@@ -231,18 +188,21 @@
           uuid: inPluginUUID
         };
         websocket.send(JSON.stringify(registerPayload));
+
+        var getGlobalPayload = {
+          event: "getGlobalSettings",
+          context: inPluginUUID
+        };
+        websocket.send(JSON.stringify(getGlobalPayload));
       };
 
       websocket.onmessage = function (evt) {
         try {
           var jsonObj = JSON.parse(evt.data);
-          if (jsonObj.event === "didReceiveSettings") {
-            var newSettings = jsonObj.payload && jsonObj.payload.settings ? jsonObj.payload.settings : {};
-            if (newSettings.hub_done_timeout_seconds !== undefined) {
-              document.getElementById("timeoutInput").value = newSettings.hub_done_timeout_seconds;
-            }
-            if (newSettings.hub_sort_criteria) {
-              applySortCriteriaToUI(newSettings.hub_sort_criteria);
+          if (jsonObj.event === "didReceiveGlobalSettings") {
+            var gSettings = jsonObj.payload && jsonObj.payload.settings ? jsonObj.payload.settings : {};
+            if (gSettings.sort_criteria) {
+              applySortCriteriaToUI(gSettings.sort_criteria);
             }
           }
         } catch (e) {
@@ -251,33 +211,22 @@
       };
     }
 
-    function saveHubSettings() {
+    function saveGlobalSettings() {
       if (!websocket || websocket.readyState !== WebSocket.OPEN) return;
-      var input = document.getElementById("timeoutInput");
-      var val = parseFloat(input.value);
-      if (isNaN(val) || val < 0) {
-        val = 300;
-        input.value = val;
-      }
       var criteria = getSortCriteriaFromUI();
 
-      var currentSettings = (actionInfo && actionInfo.payload && actionInfo.payload.settings) || {};
-      currentSettings.hub_done_timeout_seconds = val;
-      currentSettings.hub_sort_criteria = criteria;
-
-      // Save as action-specific settings for Hub
+      // Send to global settings
       websocket.send(JSON.stringify({
-        event: "setSettings",
+        event: "setGlobalSettings",
         context: pluginUUID,
-        payload: currentSettings
+        payload: { sort_criteria: criteria }
       }));
 
-      showStatus("Hubの設定を保存しました");
+      showStatus("全スロット共通のソート設定を保存しました");
     }
 
-    document.getElementById("timeoutInput").addEventListener("change", saveHubSettings);
     ["field1", "order1", "field2", "order2", "field3", "order3"].forEach(function(id) {
-      document.getElementById(id).addEventListener("change", saveHubSettings);
+      document.getElementById(id).addEventListener("change", saveGlobalSettings);
     });
   </script>
 </body>
