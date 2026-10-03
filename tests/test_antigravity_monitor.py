@@ -937,14 +937,14 @@ def test_hub_done_legacy_preserves_done_status():
     assert hub_key.bg_color == "#43A047"
 
 
-def test_streamdeck_bridge_settings_events_update_config():
+def test_streamdeck_bridge_settings_events_update_config(tmp_path: Path):
     """Verify that willAppear and didReceiveSettings update hub_done_timeout_seconds dynamically."""
     import asyncio
 
     from src.antigravity_monitor.streamdeck_bridge import StreamDeckBridge
 
     async def _test_body():
-        bridge = StreamDeckBridge()
+        bridge = StreamDeckBridge(config_path=tmp_path / "test_cfg.json")
         # Default is 300.0
         assert bridge.config.hub_done_timeout_seconds == 300.0
 
@@ -1137,3 +1137,57 @@ def test_streamdeck_bridge_global_sort_settings(tmp_path: Path):
         assert test_cfg_path.exists()
 
     asyncio.run(_test_body())
+
+
+def test_hub_specific_sort_criteria_independent_from_global_slots():
+    """Verify hub_sort_criteria controls Hub primary session independently
+    from slot sort_criteria.
+    """
+    from src.antigravity_monitor.monitor_config import MonitorConfig, SortCriterion
+    from src.antigravity_monitor.session_detector import SessionInfo, SessionStatus
+    from src.antigravity_monitor.session_page_manager import SessionPageManager
+    from src.antigravity_monitor.state_store import StateStore
+
+    sess_zoo = SessionInfo(
+        conversation_id="sess_zoo",
+        title="Zoo Session",
+        status=SessionStatus.WORKING,
+        updated_at="2026-10-03T10:00:00Z",
+    )
+    sess_apple = SessionInfo(
+        conversation_id="sess_apple",
+        title="Apple Session",
+        status=SessionStatus.WORKING,
+        updated_at="2026-10-03T12:00:00Z",
+    )
+
+    # Global slots: title asc (Apple -> Zoo)
+    # Hub specific: updated_at asc (older first: Zoo (10:00) -> Apple (12:00))
+    cfg = MonitorConfig(
+        sort_criteria=[
+            SortCriterion(field="title", ascending=True),
+        ],
+        hub_sort_criteria=[
+            SortCriterion(field="updated_at", ascending=True),
+        ],
+    )
+
+    store = StateStore()
+    store.update_sessions([sess_zoo, sess_apple])
+    mgr = SessionPageManager(state_store=store, config=cfg)
+    mgr.refresh()
+
+    # 1. Global slots must follow sort_criteria (Apple first, Zoo second)
+    slots = mgr.get_sessions_for_current_page()
+    assert slots[0] is not None and slots[0].conversation_id == "sess_apple"
+    assert slots[1] is not None and slots[1].conversation_id == "sess_zoo"
+
+    # 2. Hub primary session must follow hub_sort_criteria (Zoo first because updated_at is older)
+    primary = mgr.get_primary_session()
+    assert primary is not None
+    assert primary.conversation_id == "sess_zoo"
+
+    # 3. Hub key reflects Zoo title
+    hub_key = mgr.build_summary_hub_key_data()
+    assert hub_key.status == "working"
+    assert "Zoo Session" in hub_key.title
