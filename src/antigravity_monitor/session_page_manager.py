@@ -22,13 +22,16 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
+from src.antigravity_monitor.monitor_config import MonitorConfig, load_monitor_config
 from src.antigravity_monitor.quota_reader import QuotaInfo, QuotaReader
 from src.antigravity_monitor.session_detector import (
     SessionDetector,
     SessionInfo,
     SessionStatus,
+    _parse_db_datetime,
 )
 from src.antigravity_monitor.state_store import StateStore
 
@@ -87,10 +90,12 @@ class SessionPageManager:
         session_detector: SessionDetector | None = None,
         quota_reader: QuotaReader | None = None,
         state_store: StateStore | None = None,
+        config: MonitorConfig | None = None,
     ) -> None:
         self.state_store = state_store
         self.detector = session_detector or SessionDetector()
         self.quota_reader = quota_reader or QuotaReader()
+        self.config = config or load_monitor_config()
         self.current_page = 0
         self._tracked_session_ids: list[str] = []
         self._cached_sessions: dict[str, SessionInfo] = {}
@@ -234,7 +239,26 @@ class SessionPageManager:
             1 for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL
         )
         working_count = sum(1 for s in all_sessions if s.status == SessionStatus.WORKING)
-        done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
+
+        if self.config.is_hub_done_timeout_enabled:
+            timeout_sec = self.config.hub_done_timeout_seconds
+            assert timeout_sec is not None
+            now = datetime.now(timezone.utc)
+            active_done_sessions: list[SessionInfo] = []
+            for s in all_sessions:
+                if s.status == SessionStatus.DONE:
+                    dt = _parse_db_datetime(s.updated_at)
+                    if dt is not None:
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        elapsed = (now - dt).total_seconds()
+                        if elapsed <= timeout_sec:
+                            active_done_sessions.append(s)
+                    else:
+                        active_done_sessions.append(s)
+            done_count = len(active_done_sessions)
+        else:
+            done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
 
         primary = self.get_primary_session()
 
@@ -243,27 +267,23 @@ class SessionPageManager:
             bg_color = self.STATUS_COLORS[SessionStatus.WAITING_FOR_APPROVAL]
             short = primary.short_title if primary else ""
             title = f"承認待ち ({waiting_count})\n{short}"
-            title = ""
             subtitle = "WAITING"
         elif working_count > 0:
             status = "working"
             bg_color = self.STATUS_COLORS[SessionStatus.WORKING]
             short = primary.short_title if primary else ""
             title = f"作業中 ({working_count})\n{short}"
-            title = ""
             subtitle = "WORKING"
         elif done_count > 0:
             status = "done"
             bg_color = self.STATUS_COLORS[SessionStatus.DONE]
             short = primary.short_title if primary else ""
             title = f"完了 ({done_count})\n{short}"
-            title = ""
             subtitle = "DONE"
         else:
             status = "empty"
             bg_color = "#263238"
             title = "Antigravity\n(待機中)"
-            title = ""
             subtitle = "READY"
 
         payload: dict[str, Any] = {"action": "activate_primary"}
@@ -277,7 +297,7 @@ class SessionPageManager:
             column=col,
             row=row,
             title=title,
-            subtitle=status.upper(),
+            subtitle=subtitle,
             status=status,
             bg_color=bg_color,
             text_color="#FFFFFF",

@@ -29,6 +29,7 @@
           "FontSize": "11"
         }
       ],
+      "PropertyInspectorPath": "PropertyInspector/hub_pi.html",
       "Controllers": ["Keypad"]
     },
     {
