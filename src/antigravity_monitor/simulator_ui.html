@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antigravity Stream Deck Controller & Simulator</title>
+  <style>
+    :root {
+      --bg: #121214;
+      --card-bg: #1c1c21;
+      --accent: #2979ff;
+      --text: #e0e0e0;
+      --text-muted: #8e8e93;
+      --border: #2c2c34;
+      --working-color: #1e88e5;
+      --waiting-color: #e53935;
+      --done-color: #43a047;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+      min-height: 100vh;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 4px;
+      color: #ffffff;
+    }
+    header p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #90caf9;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .hub-card-container {
+      background: #18181b;
+      padding: 16px 24px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      margin-bottom: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .hub-key {
+      width: 140px;
+      height: 140px;
+      border-radius: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.2);
+      border: 2px solid rgba(255,255,255,0.15);
+      padding: 12px;
+      position: relative;
+    }
+    .hub-key:hover {
+      transform: translateY(-3px) scale(1.03);
+      filter: brightness(1.15);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.7);
+    }
+    .hub-key:active {
+      transform: scale(0.96);
+    }
+    .deck-container {
+      background: #18181b;
+      padding: 20px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.1);
+      border: 1px solid var(--border);
+    }
+    .deck-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 105px);
+      grid-template-rows: repeat(3, 105px);
+      gap: 12px;
+    }
+    .deck-key {
+      background: #242429;
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.12s ease;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+    .deck-key:hover {
+      transform: translateY(-2px);
+      filter: brightness(1.15);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.6);
+    }
+    .deck-key:active {
+      transform: translateY(1px);
+      filter: brightness(0.9);
+    }
+    .deck-key.empty {
+      cursor: default;
+      opacity: 0.4;
+      background: #19191c;
+      border-style: dashed;
+    }
+    .deck-key.empty:hover {
+      transform: none;
+      filter: none;
+    }
+    .key-title {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.25;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .key-badge {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4fc3f7;
+      box-shadow: 0 0 6px #4fc3f7;
+    }
+    .pulse {
+      animation: pulse-animation 1.5s infinite;
+    }
+    @keyframes pulse-animation {
+      0% { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(79, 195, 247, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0); }
+    }
+    .info-panel {
+      margin-top: 20px;
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 12px 20px;
+      border: 1px solid var(--border);
+      max-width: 600px;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .status-legend {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+    }
+    .action-toast {
+      position: fixed;
+      bottom: 24px;
+      background: #33333d;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      pointer-events: none;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Antigravity Stream Deck Controller</h1>
+    <p>1ボタン集約ハブ ＆ 3x5 コーナーナビゲーション（左上戻る・左下/右下ページ送り）</p>
+  </header>
+
+  <!-- 1-Button Hub Key Representation -->
+  <div class="hub-card-container">
+    <div class="section-title">1ボタン圧縮版（Antigravity Hub）</div>
+    <div class="hub-key" id="hubKey" style="background-color: #263238;">
+      <div class="key-title" id="hubTitle">Antigravity<br>(読込中)</div>
+    </div>
+    <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+      優先度: 承認待ち(赤) &gt; 作業中(青) &gt; 完了(緑) ｜ クリックで最優先ウィンドウ前面化
+    </div>
+  </div>
+
+  <!-- 3x5 Key Matrix (Corner Navigation Layout) -->
+  <div class="section-title" style="margin-bottom: 8px;">
+    3x5 セッション詳細マトリックス（左上:戻る ｜ 左下:前頁 ｜ 右下:次頁）
+  </div>
+  <div class="deck-container">
+    <div class="deck-grid" id="deckGrid">
+      <!-- 15 keys (3 rows x 5 cols) rendered dynamically -->
+    </div>
+  </div>
+
+  <div class="info-panel">
+    <div class="status-legend">
+      <div class="legend-item">
+        <div class="legend-dot" style="background: var(--waiting-color);"></div>
+        <span>承認待ち</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background: var(--working-color);"></div>
+        <span>作業中</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background: var(--done-color);"></div>
+        <span>完了</span>
+      </div>
+    </div>
+    <div id="pageIndicator" style="font-size: 13px; color: var(--text-muted);">
+      Page 1 / 1
+    </div>
+  </div>
+
+  <div class="action-toast" id="toast"></div>
+
+  <script>
+    const hubKeyEl = document.getElementById("hubKey");
+    const hubTitleEl = document.getElementById("hubTitle");
+    const gridEl = document.getElementById("deckGrid");
+    const pageIndicator = document.getElementById("pageIndicator");
+    const toast = document.getElementById("toast");
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.opacity = 1;
+      setTimeout(() => { toast.style.opacity = 0; }, 2200);
+    }
+
+    async function loadStatus() {
+      try {
+        const res = await fetch("/api/status");
+        if (!res.ok) return;
+        const data = await res.json();
+        renderSimulator(data);
+      } catch (e) {
+        console.error("Fetch status failed:", e);
+      }
+    }
+
+    function renderSimulator(data) {
+      pageIndicator.textContent = `Page ${data.current_page + 1} / ${data.total_pages}`;
+      gridEl.innerHTML = "";
+
+      // 1. Find summary_hub key
+      const hubData = data.keys.find(k => k.key_id === "summary_hub");
+      if (hubData) {
+        hubKeyEl.style.backgroundColor = hubData.bg_color;
+        hubTitleEl.textContent = hubData.title;
+        hubKeyEl.onclick = async () => {
+          triggerPress("summary_hub");
+        };
+      }
+
+      // 2. Build 3x5 grid (rows 0..2, cols 0..4)
+      const matrixKeys = data.keys.filter(k => k.key_id !== "summary_hub");
+      const coordMap = {};
+      for (const k of matrixKeys) {
+        coordMap[`${k.column},${k.row}`] = k;
+      }
+
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 5; c++) {
+          const k = coordMap[`${c},${r}`];
+          const keyDiv = document.createElement("div");
+
+          if (!k) {
+            keyDiv.className = "deck-key empty";
+            keyDiv.innerHTML = `<span style="color:#444;font-size:11px;">(${c},${r})</span>`;
+          } else {
+            keyDiv.className = `deck-key ${k.status}`;
+            keyDiv.style.backgroundColor = k.bg_color;
+            keyDiv.style.color = k.text_color || "#FFFFFF";
+
+            if (k.status === "working") {
+              const badge = document.createElement("div");
+              badge.className = "key-badge pulse";
+              keyDiv.appendChild(badge);
+            }
+
+            const titleDiv = document.createElement("div");
+            titleDiv.className = "key-title";
+            titleDiv.textContent = k.title;
+            keyDiv.appendChild(titleDiv);
+
+            keyDiv.onclick = () => triggerPress(k.key_id);
+          }
+
+          gridEl.appendChild(keyDiv);
+        }
+      }
+    }
+
+    async function triggerPress(keyId) {
+      try {
+        const pressRes = await fetch("/api/press", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key_id: keyId }),
+        });
+        const pressData = await pressRes.json();
+        if (pressData.session) {
+          showToast(`🎯 最前面フォーカス: ${pressData.session}`);
+        } else if (pressData.info) {
+          showToast(`ℹ️ ${pressData.info}`);
+        } else if (keyId.includes("page_")) {
+          showToast(`📄 ページ送り`);
+        }
+        loadStatus();
+      } catch (e) {
+        console.error("Press failed:", e);
+      }
+    }
+
+    loadStatus();
+    setInterval(loadStatus, 2000);
+  </script>
+</body>
+</html>

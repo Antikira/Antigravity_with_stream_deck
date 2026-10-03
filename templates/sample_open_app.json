@@ -1,0 +1,31 @@
+{
+  "name": "Open App Action",
+  "description": "Sample Open Application slot action",
+  "action": {
+    "ActionID": "3b32117a-f584-45a0-8f81-b3e20c98d8c2",
+    "LinkedTitle": true,
+    "Name": "Open Application",
+    "Plugin": {
+      "Name": "Open Application",
+      "UUID": "com.elgato.streamdeck.system.openapp",
+      "Version": "1.0"
+    },
+    "Resources": null,
+    "Settings": {
+      "app_name": "Visual Studio Code",
+      "args": "",
+      "bring_to_front": true,
+      "bundle_id": "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe",
+      "bundle_path": "%LOCALAPPDATA%/Programs/Microsoft VS Code/Code.exe",
+      "exec": "%LOCALAPPDATA%/Programs/Microsoft VS Code/Code.exe",
+      "is_bundle": false,
+      "long_press": "quit",
+      "source": "%APPDATA%/Microsoft/Windows/Start Menu/Programs/Visual Studio Code/Visual Studio Code.lnk"
+    },
+    "State": 0,
+    "States": [
+      {}
+    ],
+    "UUID": "com.elgato.streamdeck.system.openapp"
+  }
+}

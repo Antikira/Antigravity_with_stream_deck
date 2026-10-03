@@ -1,0 +1,190 @@
+{
+  "Author": "Antigravity User",
+  "Description": "Monitor and activate Antigravity AI sessions and rate limits on Stream Deck",
+  "Name": "Antigravity Monitor",
+  "Icon": "Images/pluginIcon",
+  "URL": "https://github.com",
+  "Version": "1.2.0",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.0"
+  },
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "CodePathWin": "run.bat",
+  "Actions": [
+    {
+      "Name": "Antigravity Hub (Warning Light)",
+      "UUID": "com.user.antigravity.summary_hub",
+      "Icon": "Images/hubIcon",
+      "Tooltip": "Color prioritized warning light (Waiting > Working > Done). Tap to focus primary session.",
+      "States": [
+        {
+          "Image": "Images/hubIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Session 1",
+      "UUID": "com.user.antigravity.session_slot_1",
+      "Icon": "Images/sessionIcon",
+      "Tooltip": "Display session 1 status and activate window on press",
+      "States": [
+        {
+          "Image": "Images/sessionIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Session 2",
+      "UUID": "com.user.antigravity.session_slot_2",
+      "Icon": "Images/sessionIcon",
+      "Tooltip": "Display session 2 status and activate window on press",
+      "States": [
+        {
+          "Image": "Images/sessionIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Session 3",
+      "UUID": "com.user.antigravity.session_slot_3",
+      "Icon": "Images/sessionIcon",
+      "Tooltip": "Display session 3 status and activate window on press",
+      "States": [
+        {
+          "Image": "Images/sessionIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Session 4",
+      "UUID": "com.user.antigravity.session_slot_4",
+      "Icon": "Images/sessionIcon",
+      "Tooltip": "Display session 4 status and activate window on press",
+      "States": [
+        {
+          "Image": "Images/sessionIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Session 5",
+      "UUID": "com.user.antigravity.session_slot_5",
+      "Icon": "Images/sessionIcon",
+      "Tooltip": "Display session 5 status and activate window on press",
+      "States": [
+        {
+          "Image": "Images/sessionIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Previous Page",
+      "UUID": "com.user.antigravity.prev_page",
+      "Icon": "Images/prevIcon",
+      "Tooltip": "Previous session page",
+      "States": [
+        {
+          "Image": "Images/prevIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Next Page",
+      "UUID": "com.user.antigravity.next_page",
+      "Icon": "Images/nextIcon",
+      "Tooltip": "Next session page",
+      "States": [
+        {
+          "Image": "Images/nextIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Gemini 5-Hour Limit",
+      "UUID": "com.user.antigravity.quota_gemini_5h",
+      "Icon": "Images/quotaIcon",
+      "Tooltip": "Gemini 5-hour rate limit remaining indicator",
+      "States": [
+        {
+          "Image": "Images/quotaIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Gemini Weekly Limit",
+      "UUID": "com.user.antigravity.quota_gemini_weekly",
+      "Icon": "Images/quotaIcon",
+      "Tooltip": "Gemini weekly rate limit remaining indicator",
+      "States": [
+        {
+          "Image": "Images/quotaIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Claude/GPT 5-Hour Limit",
+      "UUID": "com.user.antigravity.quota_gpt_5h",
+      "Icon": "Images/quotaIcon",
+      "Tooltip": "Claude and GPT 5-hour rate limit remaining indicator",
+      "States": [
+        {
+          "Image": "Images/quotaIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Claude/GPT Weekly Limit",
+      "UUID": "com.user.antigravity.quota_gpt_weekly",
+      "Icon": "Images/quotaIcon",
+      "Tooltip": "Claude and GPT weekly rate limit remaining indicator",
+      "States": [
+        {
+          "Image": "Images/quotaIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
+    }
+  ]
+}
+

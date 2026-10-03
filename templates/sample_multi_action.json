@@ -1,0 +1,262 @@
+{
+  "name": "Multi Action Sample",
+  "description": "Sample multi action slot with icon",
+  "action": {
+    "ActionID": "34438502-8c8c-4fe2-923e-2b9a59616238",
+    "Actions": [
+      {
+        "Actions": [
+          {
+            "ActionID": "4498a29d-969a-40ce-9233-235cb335947f",
+            "LinkedTitle": true,
+            "Name": "ホットキー",
+            "Plugin": {
+              "Name": "Activate a Key Command",
+              "UUID": "com.elgato.streamdeck.system.hotkey",
+              "Version": "1.0"
+            },
+            "Resources": null,
+            "Settings": {
+              "Coalesce": true,
+              "Hotkeys": [
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": true,
+                  "KeyModifiers": 2,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 67,
+                  "QTKeyCode": 67,
+                  "VKeyCode": 67
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                }
+              ]
+            },
+            "State": 0,
+            "States": [
+              {
+                "Title": "Ctrl+C"
+              }
+            ],
+            "UUID": "com.elgato.streamdeck.system.hotkey"
+          },
+          {
+            "ActionID": "ef6e8ef9-89c7-4b93-8c43-5af8d04f3f90",
+            "LinkedTitle": true,
+            "Name": "Webサイト",
+            "Plugin": {
+              "Name": "Website",
+              "UUID": "com.elgato.streamdeck.system.website",
+              "Version": "1.0"
+            },
+            "Resources": null,
+            "Settings": {
+              "openInBrowser": true,
+              "path": "https://www.google.co.jp/"
+            },
+            "State": 0,
+            "States": [
+              {
+                "Title": "検索"
+              }
+            ],
+            "UUID": "com.elgato.streamdeck.system.website"
+          },
+          {
+            "ActionID": "b44ab68e-72e4-41e7-9c8b-90c09540d23f",
+            "LinkedTitle": true,
+            "Name": "遅延",
+            "Plugin": {
+              "Name": "Multi Action",
+              "UUID": "com.elgato.streamdeck.multiactions",
+              "Version": "1.0"
+            },
+            "Resources": null,
+            "Settings": {
+              "delay": 1300
+            },
+            "State": 0,
+            "States": [
+              {}
+            ],
+            "UUID": "com.elgato.streamdeck.multiactions.delay"
+          },
+          {
+            "ActionID": "216ff30f-dacf-4e79-98fc-2afdb6a93675",
+            "LinkedTitle": true,
+            "Name": "ホットキー",
+            "Plugin": {
+              "Name": "Activate a Key Command",
+              "UUID": "com.elgato.streamdeck.system.hotkey",
+              "Version": "1.0"
+            },
+            "Resources": null,
+            "Settings": {
+              "Coalesce": true,
+              "Hotkeys": [
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": true,
+                  "KeyModifiers": 2,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 86,
+                  "QTKeyCode": 86,
+                  "VKeyCode": 86
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                }
+              ]
+            },
+            "State": 0,
+            "States": [
+              {
+                "Title": "Ctrl+V"
+              }
+            ],
+            "UUID": "com.elgato.streamdeck.system.hotkey"
+          },
+          {
+            "ActionID": "5432ebf4-2a85-41d0-b6eb-d21c8609da04",
+            "LinkedTitle": true,
+            "Name": "ホットキー",
+            "Plugin": {
+              "Name": "Activate a Key Command",
+              "UUID": "com.elgato.streamdeck.system.hotkey",
+              "Version": "1.0"
+            },
+            "Resources": null,
+            "Settings": {
+              "Coalesce": true,
+              "Hotkeys": [
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 13,
+                  "QTKeyCode": 16777220,
+                  "VKeyCode": 13
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                },
+                {
+                  "KeyCmd": false,
+                  "KeyCtrl": false,
+                  "KeyModifiers": 0,
+                  "KeyOption": false,
+                  "KeyShift": false,
+                  "NativeCode": 146,
+                  "QTKeyCode": 33554431,
+                  "VKeyCode": -1
+                }
+              ]
+            },
+            "State": 0,
+            "States": [
+              {
+                "Title": "Return"
+              }
+            ],
+            "UUID": "com.elgato.streamdeck.system.hotkey"
+          }
+        ]
+      },
+      {
+        "Actions": []
+      }
+    ],
+    "LinkedTitle": true,
+    "Name": "マルチアクション",
+    "Plugin": {
+      "Name": "Multi Action",
+      "UUID": "com.elgato.streamdeck.multiactions",
+      "Version": "1.0"
+    },
+    "Resources": null,
+    "Settings": {},
+    "State": 0,
+    "States": [
+      {
+        "Image": "Images/BF2WVN1ARP57P83TKKIMKW5FF0Z.png"
+      }
+    ],
+    "UUID": "com.elgato.streamdeck.multiactions.routine"
+  }
+}
