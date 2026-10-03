@@ -25,12 +25,12 @@ except ImportError:
     websockets = None  # type: ignore
 
 from src.antigravity_monitor.collector import DataCollector
-from src.antigravity_monitor.image_generator import generate_key_svg, svg_to_data_uri
 from src.antigravity_monitor.image_generator import (
     generate_hub_rocket_svg,
     generate_key_svg,
     svg_to_data_uri,
 )
+from src.antigravity_monitor.monitor_config import MonitorConfig, load_monitor_config
 from src.antigravity_monitor.session_page_manager import (
     KeyRenderData,
     SessionPageManager,
@@ -56,16 +56,20 @@ class StreamDeckBridge:
         info: dict[str, Any] | None = None,
         state_store: StateStore | None = None,
         collector: DataCollector | None = None,
+        config: MonitorConfig | None = None,
     ) -> None:
         self.port = port
         self.plugin_uuid = plugin_uuid
         self.register_event = register_event
         self.info = info or {}
+        self.config = config or load_monitor_config()
 
         # Shared StateStore and dedicated background collector
         self.state_store = state_store or StateStore()
         self.collector = collector or DataCollector(state_store=self.state_store)
-        self.page_manager = SessionPageManager(state_store=self.state_store)
+        self.page_manager = SessionPageManager(
+            state_store=self.state_store, config=self.config
+        )
 
         self.ws: Any = None
         # Track active contexts: context -> dict(action, coordinates, settings)
