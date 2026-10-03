@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("src.profile_slot_copier")
+
 from src.profile_slot_copier.backup import BackupManager
 from src.profile_slot_copier.cli import parse_slot_spec
 from src.profile_slot_copier.copier import (

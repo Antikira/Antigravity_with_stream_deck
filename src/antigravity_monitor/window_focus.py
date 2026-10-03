@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
-from ctypes import wintypes
+import sys
 from urllib.parse import unquote, urlparse
 
 logger = logging.getLogger(__name__)
@@ -19,11 +19,18 @@ SW_RESTORE = 9
 SW_SHOW = 5
 DESKTOP_ALL_ACCESS = 0x01FF
 
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
-
-LPARAM = ctypes.c_ssize_t
-WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, LPARAM)
+if sys.platform == "win32":
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    LPARAM = ctypes.c_ssize_t
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, LPARAM)
+else:
+    user32 = None
+    kernel32 = None
+    LPARAM = ctypes.c_ssize_t
+    WNDENUMPROC = None
+    wintypes = None
 
 
 class WindowFocusManager:
@@ -33,6 +40,8 @@ class WindowFocusManager:
     def get_visible_windows(cls) -> list[tuple[int, int, str]]:
         """Return a list of (hwnd, pid, title) for all top-level visible windows in desktop."""
         results: list[tuple[int, int, str]] = []
+        if sys.platform != "win32":
+            return results
 
         def enum_window_callback(hwnd: int, lparam: int) -> int:
             if user32.IsWindowVisible(hwnd):
@@ -110,6 +119,9 @@ class WindowFocusManager:
         Uses ShowWindowAsync, thread input attachment, and SetForegroundWindow
         to overcome Windows foreground lock constraints.
         """
+        if sys.platform != "win32":
+            return False
+
         if not hwnd or not user32.IsWindow(hwnd):
             logger.warning("Invalid or non-existent window handle: %s", hwnd)
             return False
