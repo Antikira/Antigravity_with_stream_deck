@@ -22,21 +22,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from functools import cmp_to_key
 from typing import Any
 
-from src.antigravity_monitor.monitor_config import (
-    MonitorConfig,
-    SortCriterion,
-    load_monitor_config,
-)
+from src.antigravity_monitor.config import ConversationListConfig, filter_and_sort_sessions
 from src.antigravity_monitor.quota_reader import QuotaInfo, QuotaReader
 from src.antigravity_monitor.session_detector import (
     SessionDetector,
     SessionInfo,
     SessionStatus,
-    _parse_db_datetime,
 )
 from src.antigravity_monitor.state_store import StateStore
 
@@ -54,53 +47,6 @@ class KeyRenderData:
     bg_color: str = "#222222"
     text_color: str = "#FFFFFF"
     payload: dict[str, Any] | None = None
-
-
-STATUS_PRIORITY_WEIGHT = {
-    SessionStatus.WAITING_FOR_APPROVAL: 3,
-    SessionStatus.WORKING: 2,
-    SessionStatus.DONE: 1,
-}
-
-
-def _compare_sessions(
-    s1: SessionInfo,
-    s2: SessionInfo,
-    criteria: list[SortCriterion],
-) -> int:
-    """Compare two SessionInfo objects according to multi-level SortCriteria.
-
-    Returns negative if s1 < s2, positive if s1 > s2, 0 if equal.
-    """
-    for c in criteria:
-        f = c.field
-        asc = c.ascending
-        res = 0
-
-        if f == "status":
-            w1 = STATUS_PRIORITY_WEIGHT.get(s1.status, 0)
-            w2 = STATUS_PRIORITY_WEIGHT.get(s2.status, 0)
-            if w1 != w2:
-                res = 1 if w1 > w2 else -1
-
-        elif f == "updated_at":
-            dt1 = _parse_db_datetime(s1.updated_at)
-            dt2 = _parse_db_datetime(s2.updated_at)
-            ts1 = dt1.timestamp() if dt1 else 0.0
-            ts2 = dt2.timestamp() if dt2 else 0.0
-            if ts1 != ts2:
-                res = 1 if ts1 > ts2 else -1
-
-        elif f == "title":
-            t1 = (s1.title or "").lower()
-            t2 = (s2.title or "").lower()
-            if t1 != t2:
-                res = 1 if t1 > t2 else -1
-
-        if res != 0:
-            return res if asc else -res
-
-    return 0
 
 
 class SessionPageManager:
@@ -142,27 +88,17 @@ class SessionPageManager:
         session_detector: SessionDetector | None = None,
         quota_reader: QuotaReader | None = None,
         state_store: StateStore | None = None,
-        config: MonitorConfig | None = None,
+        config: ConversationListConfig | None = None,
     ) -> None:
         self.state_store = state_store
         self.detector = session_detector or SessionDetector()
         self.quota_reader = quota_reader or QuotaReader()
-        self.config = config or load_monitor_config()
+        default_cfg = state_store.get_config() if state_store else ConversationListConfig()
+        self.config = config or default_cfg
         self.current_page = 0
         self._tracked_session_ids: list[str] = []
         self._cached_sessions: dict[str, SessionInfo] = {}
         self._cached_quotas: dict[str, QuotaInfo] = {}
-
-    def sort_sessions(
-        self,
-        sessions: list[SessionInfo],
-        criteria: list[SortCriterion] | None = None,
-    ) -> list[SessionInfo]:
-        """Sort sessions according to specified or configured sort_criteria."""
-        active_criteria = criteria if criteria is not None else self.config.sort_criteria
-        res = list(sessions)
-        res.sort(key=cmp_to_key(lambda a, b: _compare_sessions(a, b, active_criteria)))
-        return res
 
     # ------------------------------------------------------------------
     # Pagination
@@ -214,29 +150,13 @@ class SessionPageManager:
                 limit=50,
                 only_main_conversations=True,
             )
-            fresh_map = {s.conversation_id: s for s in fresh_sessions}
-
-            # Maintain detection order: keep existing IDs, append newly detected ones
-            new_tracked = [cid for cid in self._tracked_session_ids if cid in fresh_map]
-            for s in fresh_sessions:
-                if s.conversation_id not in new_tracked:
-                    new_tracked.append(s.conversation_id)
-
-            self._tracked_session_ids = new_tracked
-            self._cached_sessions = fresh_map
+            filtered = filter_and_sort_sessions(fresh_sessions, self.config)
+            self._tracked_session_ids = [s.conversation_id for s in filtered]
+            self._cached_sessions = {s.conversation_id: s for s in filtered}
             if include_quota or force_quota:
                 self._cached_quotas = self.quota_reader.get_quota_stats(force=force_quota)
             else:
                 self._cached_quotas = self.quota_reader.get_cached_stats()
-
-        # Sort tracked sessions according to global collaborative criteria
-        active_sessions = [
-            self._cached_sessions[cid]
-            for cid in self._tracked_session_ids
-            if cid in self._cached_sessions
-        ]
-        sorted_sessions = self.sort_sessions(active_sessions)
-        self._tracked_session_ids = [s.conversation_id for s in sorted_sessions]
 
         # Adjust current page if out of bounds
         total = self.total_pages
@@ -272,7 +192,7 @@ class SessionPageManager:
         return None
 
     def get_primary_session(self) -> SessionInfo | None:
-        """Find the highest-priority session across all tracked sessions using hub_sort_criteria."""
+        """Find the highest-priority session across all tracked sessions."""
         all_sessions = [
             self._cached_sessions[cid]
             for cid in self._tracked_session_ids
@@ -281,18 +201,15 @@ class SessionPageManager:
         if not all_sessions:
             return None
 
-        # Hub evaluates sessions using its own hub_sort_criteria
-        hub_ordered = self.sort_sessions(all_sessions, criteria=self.config.hub_sort_criteria)
-
-        waiting = [s for s in hub_ordered if s.status == SessionStatus.WAITING_FOR_APPROVAL]
+        waiting = [s for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL]
         if waiting:
             return waiting[0]
 
-        working = [s for s in hub_ordered if s.status == SessionStatus.WORKING]
+        working = [s for s in all_sessions if s.status == SessionStatus.WORKING]
         if working:
             return working[0]
 
-        return hub_ordered[0]
+        return all_sessions[0]
 
     # ------------------------------------------------------------------
     # Key Builders
@@ -314,26 +231,7 @@ class SessionPageManager:
             1 for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL
         )
         working_count = sum(1 for s in all_sessions if s.status == SessionStatus.WORKING)
-
-        if self.config.is_hub_done_timeout_enabled:
-            timeout_sec = self.config.hub_done_timeout_seconds
-            assert timeout_sec is not None
-            now = datetime.now(timezone.utc)
-            active_done_sessions: list[SessionInfo] = []
-            for s in all_sessions:
-                if s.status == SessionStatus.DONE:
-                    dt = _parse_db_datetime(s.updated_at)
-                    if dt is not None:
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        elapsed = (now - dt).total_seconds()
-                        if elapsed <= timeout_sec:
-                            active_done_sessions.append(s)
-                    else:
-                        active_done_sessions.append(s)
-            done_count = len(active_done_sessions)
-        else:
-            done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
+        done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
 
         primary = self.get_primary_session()
 
