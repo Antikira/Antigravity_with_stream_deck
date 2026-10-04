@@ -1,0 +1,22 @@
+{
+  "sort_criteria": [
+    {
+      "field": "status",
+      "ascending": false
+    },
+    {
+      "field": "updated_at",
+      "ascending": false
+    },
+    {
+      "field": "title",
+      "ascending": true
+    }
+  ],
+  "done_retention_minutes": 60,
+  "max_inactivity_days": 7,
+  "protect_waiting_sessions": true,
+  "protect_working_sessions": true,
+  "exclude_inactive_unlocked": false,
+  "max_tracked_sessions": 20
+}
