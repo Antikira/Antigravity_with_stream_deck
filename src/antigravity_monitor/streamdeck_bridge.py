@@ -263,7 +263,6 @@ class StreamDeckBridge:
                 config = ConversationListConfig.from_dict(settings)
                 self.state_store.update_config(config)
                 self.page_manager.config = config
-                config.save_to_file(self.config_path)
                 logger.info("Updated configuration from Stream Deck Global Settings: %s", config)
             else:
                 # First time or empty global settings: sync local config to Stream Deck
