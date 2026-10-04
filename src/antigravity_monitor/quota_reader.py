@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -202,12 +203,17 @@ class QuotaReader:
     def _fetch_usage_sync(self) -> dict[str, QuotaInfo]:
         """Run agy -p /usage synchronously and parse output."""
         try:
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
             result = subprocess.run(
                 ["agy", "-p", "/usage"],
                 capture_output=True,
                 text=True,
                 check=True,
                 timeout=15.0,
+                **kwargs,
             )
             output = result.stdout
         except Exception as e:
