@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -256,6 +257,35 @@ def test_quota_reader(mock_antigravity_env: Path):
     pw = stats["gpt_weekly"]
     assert pw.remaining_percent == 99.0
     assert pw.model_group == "GPT/Claude"
+
+
+def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
+    class FakeResult:
+        stdout = MOCK_AGY_OUTPUT
+        stderr = ""
+        returncode = 0
+
+    with patch(
+        "src.antigravity_monitor.quota_reader.subprocess.run", return_value=FakeResult()
+    ) as mock_run:
+        with patch("sys.platform", "win32"):
+            reader = QuotaReader(base_dir=mock_antigravity_env)
+            reader.get_quota_stats()
+            assert mock_run.called
+            _, kwargs = mock_run.call_args
+            assert kwargs.get("creationflags") == getattr(
+                subprocess, "CREATE_NO_WINDOW", 0x08000000
+            )
+
+    with patch(
+        "src.antigravity_monitor.quota_reader.subprocess.run", return_value=FakeResult()
+    ) as mock_run:
+        with patch("sys.platform", "linux"):
+            reader = QuotaReader(base_dir=mock_antigravity_env)
+            reader.get_quota_stats()
+            assert mock_run.called
+            _, kwargs = mock_run.call_args
+            assert "creationflags" not in kwargs
 
 
 # ---------------------------------------------------------------------------
