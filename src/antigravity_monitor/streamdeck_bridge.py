@@ -167,7 +167,10 @@ class StreamDeckBridge:
             row = coords.get("row", 0)
 
             target_key = self.page_manager.get_key_data_by_action_id(
-                action_id=action, col=col, row=row
+                action_id=action,
+                col=col,
+                row=row,
+                settings=ctx_info.get("settings", {}),
             )
             if target_key:
                 await self._render_key_to_streamdeck(context, target_key, force=force)
@@ -257,6 +260,13 @@ class StreamDeckBridge:
         elif event == "keyDown":
             await self.handle_key_down(context, action, coords, payload.get("settings", {}))
 
+        elif event == "didReceiveSettings":
+            settings = payload.get("settings", {})
+            if context in self.active_contexts:
+                self.active_contexts[context]["settings"] = settings
+            self._rendered_key_cache.pop(context, None)
+            await self.update_all_keys(force=True)
+
         elif event == "didReceiveGlobalSettings":
             settings = payload.get("settings", {})
             if settings:
@@ -310,7 +320,7 @@ class StreamDeckBridge:
 
         # 1. Hub: Focus the primary (highest-priority) session window
         if suffix == "summary_hub":
-            primary = self.page_manager.get_primary_session()
+            primary = self.page_manager.get_primary_session(settings=settings)
             if primary:
                 logger.info(
                     "Hub clicked: Focusing primary session %s (%s)",

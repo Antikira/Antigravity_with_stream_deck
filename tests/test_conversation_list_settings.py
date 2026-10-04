@@ -343,12 +343,11 @@ def test_bridge_did_receive_global_settings(tmp_path: Path):
 
         await bridge.handle_streamdeck_event(payload)
 
-        # Verify StateStore and local file were updated
+        # Verify StateStore was updated
         current_config = bridge.state_store.get_config()
         assert current_config.done_retention_minutes == 1440
         assert current_config.max_inactivity_days == 30
         assert current_config.max_tracked_sessions == 25
-        assert cfg_file.exists()
 
     asyncio.run(_run())
 

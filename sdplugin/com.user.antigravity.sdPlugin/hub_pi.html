@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Hub Settings</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 9pt;
+      color: #9b9b9b;
+      background-color: #2d2d2d;
+      margin: 0;
+      padding: 10px 14px;
+      user-select: none;
+      box-sizing: border-box;
+    }
+    .sdpi-heading {
+      font-size: 9pt;
+      font-weight: 600;
+      color: #d8d8d8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 14px;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #3c3c3c;
+    }
+    .sdpi-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      min-height: 24px;
+    }
+    .sdpi-label {
+      flex: 1;
+      color: #b0b0b0;
+      font-size: 8.5pt;
+      margin-right: 8px;
+    }
+    select, input[type="number"], input[type="text"] {
+      background-color: #1e1e1e;
+      border: 1px solid #3c3c3c;
+      color: #dcdcdc;
+      padding: 3px 6px;
+      border-radius: 3px;
+      font-size: 8.5pt;
+      outline: none;
+      box-sizing: border-box;
+    }
+    select:focus, input:focus {
+      border-color: #0078d7;
+    }
+    select {
+      max-width: 150px;
+      width: 100%;
+    }
+    input[type="number"] {
+      width: 80px;
+      text-align: right;
+    }
+    .sort-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 6px;
+      align-items: center;
+    }
+    .sort-row select {
+      flex: 1;
+    }
+    .sort-badge {
+      font-size: 7.5pt;
+      color: #707070;
+      width: 14px;
+      text-align: center;
+    }
+    .hint {
+      font-size: 7.5pt;
+      color: #777777;
+      margin-top: -4px;
+      margin-bottom: 6px;
+      padding-left: 2px;
+      line-height: 1.4;
+    }
+    .sdpi-status {
+      font-size: 8pt;
+      color: #43a047;
+      min-height: 16px;
+      margin-top: 8px;
+      text-align: right;
+      transition: opacity 0.3s;
+    }
+  </style>
+</head>
+<body>
+  <div class="sdpi-wrapper">
+    <!-- Hub個別設定: 待機時間 -->
+    <div class="sdpi-heading">Hub個別設定 (マスごとの設定)</div>
+    <div class="sdpi-item">
+      <label class="sdpi-label" for="timeoutInput">Ready待機時間 (完了から準備中へ)</label>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <input type="number" id="timeoutInput" min="0" step="10" value="300" />
+        <span style="font-size: 8pt; color: #888;">秒</span>
+      </div>
+    </div>
+    <div class="hint">
+      セッション完了 (DONE) 後、ハブの警告灯が待機中 (READY) に戻るまでの時間です。<br>
+      ※負数または未設定時は自動復帰を行わず完了表示を維持します。
+    </div>
+
+    <!-- Hub個別設定: 警告灯/最優先セッション選定用ソート順 -->
+    <div class="sdpi-heading">Hub独自ソート順 (最優先選定)</div>
+    <div class="hint">
+      警告灯の表示およびタップ時にフォーカスするセッションを決定する順序です。<br>
+      状態 (承認待ち &gt; 作業中 &gt; 完了) が優先され、同状態内での選定に以下が適用されます。
+    </div>
+
+    <!-- 第1優先 -->
+    <div class="sort-row">
+      <span class="sort-badge">1</span>
+      <select id="field1">
+        <option value="status" selected>ステータス</option>
+        <option value="updated_at">最終更新日時</option>
+        <option value="title">タイトル</option>
+      </select>
+      <select id="order1">
+        <option value="desc" selected>降順</option>
+        <option value="asc">昇順</option>
+      </select>
+    </div>
+
+    <!-- 第2優先 -->
+    <div class="sort-row">
+      <span class="sort-badge">2</span>
+      <select id="field2">
+        <option value="status">ステータス</option>
+        <option value="updated_at" selected>最終更新日時</option>
+        <option value="title">タイトル</option>
+      </select>
+      <select id="order2">
+        <option value="desc" selected>降順</option>
+        <option value="asc">昇順</option>
+      </select>
+    </div>
+
+    <!-- 第3優先 -->
+    <div class="sort-row">
+      <span class="sort-badge">3</span>
+      <select id="field3">
+        <option value="status">ステータス</option>
+        <option value="updated_at">最終更新日時</option>
+        <option value="title" selected>タイトル</option>
+      </select>
+      <select id="order3">
+        <option value="asc" selected>昇順</option>
+        <option value="desc">降順</option>
+      </select>
+    </div>
+
+    <div id="statusMessage" class="sdpi-status"></div>
+  </div>
+
+  <script>
+    var websocket = null;
+    var pluginUUID = null;
+    var actionInfo = null;
+
+    function applySortCriteriaToUI(criteria) {
+      if (!Array.isArray(criteria) || criteria.length === 0) return;
+      if (criteria[0]) {
+        document.getElementById("field1").value = criteria[0].field;
+        document.getElementById("order1").value = criteria[0].ascending ? "asc" : "desc";
+      }
+      if (criteria[1]) {
+        document.getElementById("field2").value = criteria[1].field;
+        document.getElementById("order2").value = criteria[1].ascending ? "asc" : "desc";
+      }
+      if (criteria[2]) {
+        document.getElementById("field3").value = criteria[2].field;
+        document.getElementById("order3").value = criteria[2].ascending ? "asc" : "desc";
+      }
+    }
+
+    function getSortCriteriaFromUI() {
+      return [
+        { field: document.getElementById("field1").value, ascending: document.getElementById("order1").value === "asc" },
+        { field: document.getElementById("field2").value, ascending: document.getElementById("order2").value === "asc" },
+        { field: document.getElementById("field3").value, ascending: document.getElementById("order3").value === "asc" }
+      ];
+    }
+
+    function showStatus(msg) {
+      var statusElem = document.getElementById("statusMessage");
+      if (statusElem) {
+        statusElem.textContent = msg;
+        setTimeout(function () {
+          statusElem.textContent = "";
+        }, 2000);
+      }
+    }
+
+    function applySettingsToUI(settings) {
+      if (!settings || typeof settings !== "object") return;
+      if (settings.hub_done_timeout_seconds !== undefined && settings.hub_done_timeout_seconds !== null) {
+        document.getElementById("timeoutInput").value = settings.hub_done_timeout_seconds;
+      }
+      if (settings.hub_sort_criteria) {
+        applySortCriteriaToUI(settings.hub_sort_criteria);
+      }
+    }
+
+    function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo, inActionInfo) {
+      pluginUUID = inPluginUUID;
+
+      if (inActionInfo) {
+        try {
+          actionInfo = JSON.parse(inActionInfo);
+          var settings = actionInfo.payload && actionInfo.payload.settings ? actionInfo.payload.settings : {};
+          applySettingsToUI(settings);
+        } catch (e) {
+          console.error("Failed to parse actionInfo:", e);
+        }
+      }
+
+      websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+
+      websocket.onopen = function () {
+        var registerPayload = {
+          event: inRegisterEvent,
+          uuid: inPluginUUID
+        };
+        websocket.send(JSON.stringify(registerPayload));
+      };
+
+      websocket.onmessage = function (evt) {
+        try {
+          var jsonObj = JSON.parse(evt.data);
+          if (jsonObj.event === "didReceiveSettings") {
+            var newSettings = jsonObj.payload && jsonObj.payload.settings ? jsonObj.payload.settings : {};
+            applySettingsToUI(newSettings);
+          }
+        } catch (e) {
+          console.error("Error processing websocket message:", e);
+        }
+      };
+    }
+
+    function saveHubSettings() {
+      if (!websocket || websocket.readyState !== WebSocket.OPEN) return;
+      var input = document.getElementById("timeoutInput");
+      var val = parseFloat(input.value);
+      if (isNaN(val)) {
+        val = 300;
+        input.value = val;
+      }
+      var criteria = getSortCriteriaFromUI();
+
+      var currentSettings = (actionInfo && actionInfo.payload && actionInfo.payload.settings) || {};
+      currentSettings.hub_done_timeout_seconds = val;
+      currentSettings.hub_sort_criteria = criteria;
+
+      // Save as per-key instance settings via setSettings
+      websocket.send(JSON.stringify({
+        event: "setSettings",
+        context: pluginUUID,
+        payload: currentSettings
+      }));
+
+      showStatus("Hub設定を保存しました");
+    }
+
+    document.getElementById("timeoutInput").addEventListener("change", saveHubSettings);
+    ["field1", "order1", "field2", "order2", "field3", "order3"].forEach(function(id) {
+      document.getElementById(id).addEventListener("change", saveHubSettings);
+    });
+  </script>
+</body>
+</html>
