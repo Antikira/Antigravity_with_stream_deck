@@ -32,6 +32,76 @@ DEFAULT_SORT_CRITERIA: list[dict[str, Any]] = [
     {"field": "title", "ascending": True},
 ]
 
+DEFAULT_HUB_SORT_CRITERIA: list[dict[str, Any]] = [
+    {"field": "status", "ascending": False},
+    {"field": "updated_at", "ascending": False},
+    {"field": "title", "ascending": True},
+]
+
+
+@dataclass
+class HubConfig:
+    """Per-instance configuration for Summary Hub key."""
+
+    hub_done_timeout_seconds: float | None = 300.0
+    hub_sort_criteria: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {"field": "status", "ascending": False},
+            {"field": "updated_at", "ascending": False},
+            {"field": "title", "ascending": True},
+        ]
+    )
+
+    @property
+    def is_hub_done_timeout_enabled(self) -> bool:
+        """Check whether done-to-ready timeout transition is active."""
+        return self.hub_done_timeout_seconds is not None and self.hub_done_timeout_seconds >= 0
+
+    @classmethod
+    def from_settings(cls, settings: dict[str, Any] | None) -> HubConfig:
+        """Create HubConfig from per-key Stream Deck settings dictionary."""
+        if not settings or not isinstance(settings, dict):
+            return cls()
+
+        timeout: float | None = 300.0
+        if "hub_done_timeout_seconds" in settings:
+            raw_timeout = settings.get("hub_done_timeout_seconds")
+            if raw_timeout is None:
+                timeout = None
+            else:
+                try:
+                    val = float(raw_timeout)
+                    if val < 0:
+                        timeout = None
+                    else:
+                        timeout = val
+                except (ValueError, TypeError):
+                    timeout = None
+
+        raw_criteria = settings.get("hub_sort_criteria")
+        sort_criteria = []
+        if isinstance(raw_criteria, list):
+            valid_fields = {"status", "updated_at", "title"}
+            for item in raw_criteria:
+                if isinstance(item, dict) and item.get("field") in valid_fields:
+                    sort_criteria.append(
+                        {
+                            "field": item["field"],
+                            "ascending": bool(item.get("ascending", False)),
+                        }
+                    )
+        if not sort_criteria:
+            sort_criteria = [
+                {"field": "status", "ascending": False},
+                {"field": "updated_at", "ascending": False},
+                {"field": "title", "ascending": True},
+            ]
+
+        return cls(
+            hub_done_timeout_seconds=timeout,
+            hub_sort_criteria=sort_criteria,
+        )
+
 
 @dataclass
 class ConversationListConfig:
