@@ -205,7 +205,7 @@ class QuotaReader:
         try:
             kwargs = {}
             if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
             result = subprocess.run(
                 ["agy", "-p", "/usage"],
