@@ -15,7 +15,6 @@ from src.antigravity_monitor.image_generator import (
     generate_key_svg,
     svg_to_data_uri,
 )
-from src.antigravity_monitor.monitor_config import MonitorConfig, load_monitor_config
 from src.antigravity_monitor.quota_reader import (
     QuotaReader,
     _format_tokens,
@@ -158,9 +157,7 @@ def mock_antigravity_env(tmp_path: Path):
 
 
 def test_session_detector(mock_antigravity_env: Path):
-    detector = SessionDetector(
-        base_dir=mock_antigravity_env, ignore_preexisting_done=False
-    )
+    detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
     sessions = detector.list_sessions(limit=10)
 
     assert len(sessions) == 6
@@ -206,9 +203,7 @@ def test_session_detector_recognizes_waiting_tool_call():
     status = detector.determine_status(
         "CASCADE_RUN_STATUS_RUNNING",
         not_fully_idle=True,
-        last_transcript_step={
-            "tool_calls": [{"name": "run_command", "status": "PENDING"}]
-        },
+        last_transcript_step={"tool_calls": [{"name": "run_command", "status": "PENDING"}]},
     )
 
     assert status == SessionStatus.WAITING_FOR_APPROVAL
@@ -270,9 +265,7 @@ def test_quota_reader(mock_antigravity_env: Path):
 
 def test_session_page_manager(mock_antigravity_env: Path):
     with _mock_subprocess_empty():
-        detector = SessionDetector(
-            base_dir=mock_antigravity_env, ignore_preexisting_done=False
-        )
+        detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
         reader = QuotaReader(base_dir=mock_antigravity_env)
         mgr = SessionPageManager(
             session_detector=detector,
@@ -324,9 +317,7 @@ def test_session_page_manager(mock_antigravity_env: Path):
 
 def test_action_id_resolution(mock_antigravity_env: Path):
     with _mock_subprocess_agy():
-        detector = SessionDetector(
-            base_dir=mock_antigravity_env, ignore_preexisting_done=False
-        )
+        detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
         reader = QuotaReader(base_dir=mock_antigravity_env)
         mgr = SessionPageManager(
             session_detector=detector,
@@ -374,9 +365,7 @@ def test_action_id_resolution(mock_antigravity_env: Path):
 
 def test_summary_hub_key_priority(mock_antigravity_env: Path):
     with _mock_subprocess_empty():
-        detector = SessionDetector(
-            base_dir=mock_antigravity_env, ignore_preexisting_done=False
-        )
+        detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
         mgr = SessionPageManager(session_detector=detector)
         mgr.refresh()
 
@@ -441,9 +430,7 @@ def test_hub_rocket_svg_generator():
 
 def test_window_focus_helpers():
     # Workspace URI parsing helper test
-    hwnd = WindowFocusManager.find_window_for_workspace(
-        "file:///non_existent_path_xyz_1234"
-    )
+    hwnd = WindowFocusManager.find_window_for_workspace("file:///non_existent_path_xyz_1234")
     assert hwnd is None
 
     # Invalid handle focus test
@@ -742,9 +729,7 @@ def test_data_collector_and_page_manager(mock_antigravity_env: Path):
     from src.antigravity_monitor.state_store import StateStore
 
     store = StateStore()
-    detector = SessionDetector(
-        base_dir=mock_antigravity_env, ignore_preexisting_done=False
-    )
+    detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
     quota_reader = MagicMock()
     quota_reader.get_quota_stats.return_value = {}
 
@@ -784,9 +769,7 @@ def test_streamdeck_bridge_dirty_render_cache():
     from src.antigravity_monitor.streamdeck_bridge import StreamDeckBridge
 
     async def _test_body():
-        bridge = StreamDeckBridge(
-            port=1234, plugin_uuid="uuid", register_event="register"
-        )
+        bridge = StreamDeckBridge(port=1234, plugin_uuid="uuid", register_event="register")
         bridge.ws = AsyncMock()
         bridge.active_contexts["ctx_1"] = {
             "action": "com.user.antigravity.summary_hub",
@@ -829,187 +812,3 @@ def test_streamdeck_bridge_dirty_render_cache():
         assert bridge.ws.send.call_count == 6
 
     asyncio.run(_test_body())
-
-
-# ---------------------------------------------------------------------------
-# Tests for MonitorConfig and Hub Done Timeout
-# ---------------------------------------------------------------------------
-
-
-def test_monitor_config_defaults():
-    """Verify default timeout is 300 seconds when config file does not exist."""
-    non_existent = Path("non_existent_config.json")
-    cfg = load_monitor_config(non_existent)
-    assert cfg.hub_done_timeout_seconds == 300.0
-    assert cfg.is_hub_done_timeout_enabled is True
-
-
-def test_monitor_config_load_custom(tmp_path: Path):
-    """Verify positive numbers are correctly loaded as timeout."""
-    cfg_file = tmp_path / "custom_config.json"
-    cfg_file.write_text(json.dumps({"hub_done_timeout_seconds": 60}), encoding="utf-8")
-
-    cfg = load_monitor_config(cfg_file)
-    assert cfg.hub_done_timeout_seconds == 60.0
-    assert cfg.is_hub_done_timeout_enabled is True
-
-    # Test 0 (should be enabled with 0 seconds)
-    cfg_file.write_text(json.dumps({"hub_done_timeout_seconds": 0}), encoding="utf-8")
-    cfg_zero = load_monitor_config(cfg_file)
-    assert cfg_zero.hub_done_timeout_seconds == 0.0
-    assert cfg_zero.is_hub_done_timeout_enabled is True
-
-
-def test_monitor_config_negative_or_invalid_preserves_legacy(tmp_path: Path):
-    """Verify negative numbers or invalid values disable timeout (legacy behavior)."""
-    cfg_file = tmp_path / "legacy_config.json"
-
-    # Negative number
-    cfg_file.write_text(json.dumps({"hub_done_timeout_seconds": -1}), encoding="utf-8")
-    cfg_neg = load_monitor_config(cfg_file)
-    assert cfg_neg.hub_done_timeout_seconds is None
-    assert cfg_neg.is_hub_done_timeout_enabled is False
-
-    # Invalid type (e.g. string or null)
-    cfg_file.write_text(
-        json.dumps({"hub_done_timeout_seconds": "disabled"}), encoding="utf-8"
-    )
-    cfg_str = load_monitor_config(cfg_file)
-    assert cfg_str.hub_done_timeout_seconds is None
-    assert cfg_str.is_hub_done_timeout_enabled is False
-
-    cfg_file.write_text(
-        json.dumps({"hub_done_timeout_seconds": None}), encoding="utf-8"
-    )
-    cfg_none = load_monitor_config(cfg_file)
-    assert cfg_none.hub_done_timeout_seconds is None
-    assert cfg_none.is_hub_done_timeout_enabled is False
-
-
-def test_hub_done_timeout_switches_to_ready():
-    """Verify that after configured timeout, summary hub switches from DONE to READY."""
-    from datetime import timedelta
-
-    from src.antigravity_monitor.session_detector import SessionInfo
-
-    now = datetime.now(timezone.utc)
-    old_time = (now - timedelta(seconds=400)).isoformat()
-    recent_time = (now - timedelta(seconds=50)).isoformat()
-
-    # Session completed 400s ago
-    old_session = SessionInfo(
-        conversation_id="old-done-sess",
-        title="Old Session",
-        status=SessionStatus.DONE,
-        updated_at=old_time,
-    )
-
-    # Manager with 300s timeout -> should timeout and show empty/READY
-    mgr = SessionPageManager(config=MonitorConfig(hub_done_timeout_seconds=300))
-    mgr._tracked_session_ids = ["old-done-sess"]
-    mgr._cached_sessions = {"old-done-sess": old_session}
-
-    hub_key = mgr.build_summary_hub_key_data()
-    assert hub_key.status == "empty"
-    assert hub_key.subtitle == "READY"
-    assert hub_key.bg_color == "#263238"
-
-    # Session completed 50s ago -> within 300s, should show DONE
-    recent_session = SessionInfo(
-        conversation_id="recent-done-sess",
-        title="Recent Session",
-        status=SessionStatus.DONE,
-        updated_at=recent_time,
-    )
-    mgr._tracked_session_ids = ["recent-done-sess"]
-    mgr._cached_sessions = {"recent-done-sess": recent_session}
-
-    hub_key_recent = mgr.build_summary_hub_key_data()
-    assert hub_key_recent.status == "done"
-    assert hub_key_recent.subtitle == "DONE"
-    assert hub_key_recent.bg_color == "#43A047"
-
-
-def test_hub_done_legacy_preserves_done_status():
-    """Verify that when timeout is disabled (None / -1), hub stays DONE indefinitely."""
-    from datetime import timedelta
-
-    from src.antigravity_monitor.session_detector import SessionInfo
-
-    now = datetime.now(timezone.utc)
-    ancient_time = (now - timedelta(days=10)).isoformat()
-
-    ancient_session = SessionInfo(
-        conversation_id="ancient-done-sess",
-        title="Ancient Session",
-        status=SessionStatus.DONE,
-        updated_at=ancient_time,
-    )
-
-    # Disabled timeout (None / legacy)
-    mgr_legacy = SessionPageManager(config=MonitorConfig(hub_done_timeout_seconds=None))
-    mgr_legacy._tracked_session_ids = ["ancient-done-sess"]
-    mgr_legacy._cached_sessions = {"ancient-done-sess": ancient_session}
-
-    hub_key = mgr_legacy.build_summary_hub_key_data()
-    assert hub_key.status == "done"
-    assert hub_key.subtitle == "DONE"
-    assert hub_key.bg_color == "#43A047"
-
-
-def test_streamdeck_bridge_settings_events_update_config():
-    """Verify that willAppear and didReceiveSettings update hub_done_timeout_seconds dynamically."""
-    import asyncio
-
-    from src.antigravity_monitor.streamdeck_bridge import StreamDeckBridge
-
-    async def _test_body():
-        bridge = StreamDeckBridge()
-        # Default is 300.0
-        assert bridge.config.hub_done_timeout_seconds == 300.0
-
-        # 1. willAppear event with custom settings
-        will_appear_data = {
-            "event": "willAppear",
-            "action": "com.user.antigravity.summary_hub",
-            "context": "ctx_hub_1",
-            "payload": {
-                "coordinates": {"column": 0, "row": 0},
-                "settings": {"hub_done_timeout_seconds": 120},
-            },
-        }
-        await bridge.handle_streamdeck_event(will_appear_data)
-        assert bridge.config.hub_done_timeout_seconds == 120.0
-        assert bridge.active_contexts["ctx_hub_1"]["settings"] == {"hub_done_timeout_seconds": 120}
-
-        # 2. didReceiveSettings event updating timeout to 60s
-        did_receive_data = {
-            "event": "didReceiveSettings",
-            "action": "com.user.antigravity.summary_hub",
-            "context": "ctx_hub_1",
-            "payload": {
-                "coordinates": {"column": 0, "row": 0},
-                "settings": {"hub_done_timeout_seconds": 60},
-            },
-        }
-        await bridge.handle_streamdeck_event(did_receive_data)
-        assert bridge.config.hub_done_timeout_seconds == 60.0
-        assert bridge.active_contexts["ctx_hub_1"]["settings"] == {"hub_done_timeout_seconds": 60}
-
-        # 3. didReceiveSettings with invalid/negative value -> fallback to None (legacy disabled)
-        did_receive_invalid = {
-            "event": "didReceiveSettings",
-            "action": "com.user.antigravity.summary_hub",
-            "context": "ctx_hub_1",
-            "payload": {
-                "coordinates": {"column": 0, "row": 0},
-                "settings": {"hub_done_timeout_seconds": -1},
-            },
-        }
-        await bridge.handle_streamdeck_event(did_receive_invalid)
-        assert bridge.config.hub_done_timeout_seconds is None
-
-    asyncio.run(_test_body())
-
-
-

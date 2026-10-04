@@ -22,16 +22,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
-from src.antigravity_monitor.monitor_config import MonitorConfig, load_monitor_config
+from src.antigravity_monitor.config import ConversationListConfig, filter_and_sort_sessions
 from src.antigravity_monitor.quota_reader import QuotaInfo, QuotaReader
 from src.antigravity_monitor.session_detector import (
     SessionDetector,
     SessionInfo,
     SessionStatus,
-    _parse_db_datetime,
 )
 from src.antigravity_monitor.state_store import StateStore
 
@@ -90,12 +88,13 @@ class SessionPageManager:
         session_detector: SessionDetector | None = None,
         quota_reader: QuotaReader | None = None,
         state_store: StateStore | None = None,
-        config: MonitorConfig | None = None,
+        config: ConversationListConfig | None = None,
     ) -> None:
         self.state_store = state_store
         self.detector = session_detector or SessionDetector()
         self.quota_reader = quota_reader or QuotaReader()
-        self.config = config or load_monitor_config()
+        default_cfg = state_store.get_config() if state_store else ConversationListConfig()
+        self.config = config or default_cfg
         self.current_page = 0
         self._tracked_session_ids: list[str] = []
         self._cached_sessions: dict[str, SessionInfo] = {}
@@ -151,16 +150,9 @@ class SessionPageManager:
                 limit=50,
                 only_main_conversations=True,
             )
-            fresh_map = {s.conversation_id: s for s in fresh_sessions}
-
-            # Maintain detection order: keep existing IDs, append newly detected ones
-            new_tracked = [cid for cid in self._tracked_session_ids if cid in fresh_map]
-            for s in fresh_sessions:
-                if s.conversation_id not in new_tracked:
-                    new_tracked.append(s.conversation_id)
-
-            self._tracked_session_ids = new_tracked
-            self._cached_sessions = fresh_map
+            filtered = filter_and_sort_sessions(fresh_sessions, self.config)
+            self._tracked_session_ids = [s.conversation_id for s in filtered]
+            self._cached_sessions = {s.conversation_id: s for s in filtered}
             if include_quota or force_quota:
                 self._cached_quotas = self.quota_reader.get_quota_stats(force=force_quota)
             else:
@@ -239,26 +231,7 @@ class SessionPageManager:
             1 for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL
         )
         working_count = sum(1 for s in all_sessions if s.status == SessionStatus.WORKING)
-
-        if self.config.is_hub_done_timeout_enabled:
-            timeout_sec = self.config.hub_done_timeout_seconds
-            assert timeout_sec is not None
-            now = datetime.now(timezone.utc)
-            active_done_sessions: list[SessionInfo] = []
-            for s in all_sessions:
-                if s.status == SessionStatus.DONE:
-                    dt = _parse_db_datetime(s.updated_at)
-                    if dt is not None:
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        elapsed = (now - dt).total_seconds()
-                        if elapsed <= timeout_sec:
-                            active_done_sessions.append(s)
-                    else:
-                        active_done_sessions.append(s)
-            done_count = len(active_done_sessions)
-        else:
-            done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
+        done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
 
         primary = self.get_primary_session()
 

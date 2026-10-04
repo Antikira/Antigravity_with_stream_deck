@@ -101,12 +101,10 @@ def generate_key_svg(
 
 
 _SVG_HEADER = (
-    '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" '
-    'viewBox="0 0 144 144">\n'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">\n'
 )
 _STATUS_BAR_RECT = (
-    '  <rect x="14" y="110" width="116" height="24" rx="12" '
-    'fill="#000000" opacity="0.45" />\n'
+    '  <rect x="14" y="110" width="116" height="24" rx="12" fill="#000000" opacity="0.45" />\n'
 )
 
 
