@@ -65,8 +65,7 @@ class StateStore:
             new_cached = {s.conversation_id: s for s in filtered}
 
             changed = (
-                new_tracked != self._tracked_session_ids
-                or new_cached != self._cached_sessions
+                new_tracked != self._tracked_session_ids or new_cached != self._cached_sessions
             )
             self._tracked_session_ids = new_tracked
             self._cached_sessions = new_cached
@@ -111,8 +110,7 @@ class StateStore:
 
             # Check if any change occurred
             changed = (
-                new_tracked != self._tracked_session_ids
-                or new_cached != self._cached_sessions
+                new_tracked != self._tracked_session_ids or new_cached != self._cached_sessions
             )
 
             if changed:

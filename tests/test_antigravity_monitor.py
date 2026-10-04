@@ -157,9 +157,7 @@ def mock_antigravity_env(tmp_path: Path):
 
 
 def test_session_detector(mock_antigravity_env: Path):
-    detector = SessionDetector(
-        base_dir=mock_antigravity_env, ignore_preexisting_done=False
-    )
+    detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
     sessions = detector.list_sessions(limit=10)
 
     assert len(sessions) == 6
@@ -205,9 +203,7 @@ def test_session_detector_recognizes_waiting_tool_call():
     status = detector.determine_status(
         "CASCADE_RUN_STATUS_RUNNING",
         not_fully_idle=True,
-        last_transcript_step={
-            "tool_calls": [{"name": "run_command", "status": "PENDING"}]
-        },
+        last_transcript_step={"tool_calls": [{"name": "run_command", "status": "PENDING"}]},
     )
 
     assert status == SessionStatus.WAITING_FOR_APPROVAL
@@ -269,9 +265,7 @@ def test_quota_reader(mock_antigravity_env: Path):
 
 def test_session_page_manager(mock_antigravity_env: Path):
     with _mock_subprocess_empty():
-        detector = SessionDetector(
-            base_dir=mock_antigravity_env, ignore_preexisting_done=False
-        )
+        detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
         reader = QuotaReader(base_dir=mock_antigravity_env)
         mgr = SessionPageManager(
             session_detector=detector,
@@ -323,9 +317,7 @@ def test_session_page_manager(mock_antigravity_env: Path):
 
 def test_action_id_resolution(mock_antigravity_env: Path):
     with _mock_subprocess_agy():
-        detector = SessionDetector(
-            base_dir=mock_antigravity_env, ignore_preexisting_done=False
-        )
+        detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
         reader = QuotaReader(base_dir=mock_antigravity_env)
         mgr = SessionPageManager(
             session_detector=detector,
@@ -373,9 +365,7 @@ def test_action_id_resolution(mock_antigravity_env: Path):
 
 def test_summary_hub_key_priority(mock_antigravity_env: Path):
     with _mock_subprocess_empty():
-        detector = SessionDetector(
-            base_dir=mock_antigravity_env, ignore_preexisting_done=False
-        )
+        detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
         mgr = SessionPageManager(session_detector=detector)
         mgr.refresh()
 
@@ -440,9 +430,7 @@ def test_hub_rocket_svg_generator():
 
 def test_window_focus_helpers():
     # Workspace URI parsing helper test
-    hwnd = WindowFocusManager.find_window_for_workspace(
-        "file:///non_existent_path_xyz_1234"
-    )
+    hwnd = WindowFocusManager.find_window_for_workspace("file:///non_existent_path_xyz_1234")
     assert hwnd is None
 
     # Invalid handle focus test
@@ -741,9 +729,7 @@ def test_data_collector_and_page_manager(mock_antigravity_env: Path):
     from src.antigravity_monitor.state_store import StateStore
 
     store = StateStore()
-    detector = SessionDetector(
-        base_dir=mock_antigravity_env, ignore_preexisting_done=False
-    )
+    detector = SessionDetector(base_dir=mock_antigravity_env, ignore_preexisting_done=False)
     quota_reader = MagicMock()
     quota_reader.get_quota_stats.return_value = {}
 
@@ -783,9 +769,7 @@ def test_streamdeck_bridge_dirty_render_cache():
     from src.antigravity_monitor.streamdeck_bridge import StreamDeckBridge
 
     async def _test_body():
-        bridge = StreamDeckBridge(
-            port=1234, plugin_uuid="uuid", register_event="register"
-        )
+        bridge = StreamDeckBridge(port=1234, plugin_uuid="uuid", register_event="register")
         bridge.ws = AsyncMock()
         bridge.active_contexts["ctx_1"] = {
             "action": "com.user.antigravity.summary_hub",

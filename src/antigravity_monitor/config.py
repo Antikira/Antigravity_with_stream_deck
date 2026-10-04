@@ -117,9 +117,7 @@ class ConversationListConfig:
             max_inactivity_days=max_inactivity,
             protect_waiting_sessions=bool(data.get("protect_waiting_sessions", True)),
             protect_working_sessions=bool(data.get("protect_working_sessions", True)),
-            exclude_inactive_unlocked=bool(
-                data.get("exclude_inactive_unlocked", False)
-            ),
+            exclude_inactive_unlocked=bool(data.get("exclude_inactive_unlocked", False)),
             max_tracked_sessions=max_tracked,
         )
 
@@ -128,9 +126,7 @@ class ConversationListConfig:
         """Load configuration from a local JSON file with fallback."""
         config_path = Path(path) if path else DEFAULT_CONFIG_PATH
         if not config_path.is_file():
-            logger.info(
-                "Config file not found at %s. Using default configuration.", config_path
-            )
+            logger.info("Config file not found at %s. Using default configuration.", config_path)
             return cls()
 
         try:
@@ -138,9 +134,7 @@ class ConversationListConfig:
                 data = json.load(f)
             return cls.from_dict(data)
         except Exception as e:
-            logger.warning(
-                "Failed to load config from %s: %s. Using defaults.", config_path, e
-            )
+            logger.warning("Failed to load config from %s: %s. Using defaults.", config_path, e)
             return cls()
 
     def save_to_file(self, path: Path | str | None = None) -> None:
@@ -196,10 +190,7 @@ def is_session_visible(
         return False
 
     # 2. Protection rules for active sessions
-    if (
-        config.protect_waiting_sessions
-        and session.status == SessionStatus.WAITING_FOR_APPROVAL
-    ):
+    if config.protect_waiting_sessions and session.status == SessionStatus.WAITING_FOR_APPROVAL:
         return True
     if config.protect_working_sessions and session.status == SessionStatus.WORKING:
         return True

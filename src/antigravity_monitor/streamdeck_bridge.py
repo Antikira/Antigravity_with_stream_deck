@@ -70,9 +70,7 @@ class StreamDeckBridge:
         # Shared StateStore and dedicated background collector
         self.state_store = state_store or StateStore(config=initial_config)
         self.collector = collector or DataCollector(state_store=self.state_store)
-        self.page_manager = SessionPageManager(
-            state_store=self.state_store, config=initial_config
-        )
+        self.page_manager = SessionPageManager(state_store=self.state_store, config=initial_config)
 
         self.ws: Any = None
         # Track active contexts: context -> dict(action, coordinates, settings)
@@ -257,9 +255,7 @@ class StreamDeckBridge:
             self._rendered_key_cache.pop(context, None)
 
         elif event == "keyDown":
-            await self.handle_key_down(
-                context, action, coords, payload.get("settings", {})
-            )
+            await self.handle_key_down(context, action, coords, payload.get("settings", {}))
 
         elif event == "didReceiveGlobalSettings":
             settings = payload.get("settings", {})
@@ -268,9 +264,7 @@ class StreamDeckBridge:
                 self.state_store.update_config(config)
                 self.page_manager.config = config
                 config.save_to_file(self.config_path)
-                logger.info(
-                    "Updated configuration from Stream Deck Global Settings: %s", config
-                )
+                logger.info("Updated configuration from Stream Deck Global Settings: %s", config)
             else:
                 # First time or empty global settings: sync local config to Stream Deck
                 current_config = self.state_store.get_config()
@@ -284,9 +278,7 @@ class StreamDeckBridge:
                             }
                         )
                     )
-                    logger.info(
-                        "Synchronized local configuration to Stream Deck Global Settings."
-                    )
+                    logger.info("Synchronized local configuration to Stream Deck Global Settings.")
             await self.update_all_keys(force=True)
 
         elif event == "propertyInspectorDidAppear":
@@ -315,9 +307,7 @@ class StreamDeckBridge:
         row = coords.get("row", -1)
         suffix = action.split(".")[-1]
 
-        logger.info(
-            "Key down: action=%s, suffix=%s, coords=(%s, %s)", action, suffix, col, row
-        )
+        logger.info("Key down: action=%s, suffix=%s, coords=(%s, %s)", action, suffix, col, row)
 
         # 1. Hub: Focus the primary (highest-priority) session window
         if suffix == "summary_hub":
@@ -355,10 +345,7 @@ class StreamDeckBridge:
                 # If 1-based (session_slot_1..5), map to 0..4
                 slot_index = num - 1 if num in (1, 2, 3, 4, 5) else num
 
-        if (
-            slot_index is not None
-            and 0 <= slot_index < self.page_manager.items_per_page
-        ):
+        if slot_index is not None and 0 <= slot_index < self.page_manager.items_per_page:
             session = self.page_manager.get_session_by_slot(slot_index)
             if session:
                 logger.info(
@@ -596,9 +583,7 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--server", action="store_true", help="Run interactive simulator HTTP server"
     )
-    parser.add_argument(
-        "--server-port", type=int, default=18500, help="Simulator server port"
-    )
+    parser.add_argument("--server-port", type=int, default=18500, help="Simulator server port")
     return parser.parse_args()
 
 
