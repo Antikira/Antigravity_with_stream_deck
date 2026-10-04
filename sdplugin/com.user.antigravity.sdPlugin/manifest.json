@@ -1,7 +1,7 @@
 {
-  "Author": "Antikira",
+  "Author": "Antigravity User",
   "Description": "Monitor and activate Antigravity AI sessions and rate limits on Stream Deck",
-  "Name": "Antigravity with stream deck",
+  "Name": "Antikitia",
   "Icon": "Images/pluginIcon",
   "URL": "https://github.com/Antikira/Antigravity_with_stream_deck",
   "Version": "1.2.0",
@@ -21,6 +21,7 @@
       "Name": "Antigravity Hub (Warning Light)",
       "UUID": "com.user.antigravity.summary_hub",
       "Icon": "Images/hubIcon",
+      "PropertyInspectorPath": "global_pi.html",
       "Tooltip": "Color prioritized warning light (Waiting > Working > Done). Tap to focus primary session.",
       "States": [
         {
@@ -29,13 +30,13 @@
           "FontSize": "11"
         }
       ],
-      "PropertyInspectorPath": "PropertyInspector/hub_pi.html",
       "Controllers": ["Keypad"]
     },
     {
       "Name": "Session 1",
       "UUID": "com.user.antigravity.session_slot_1",
       "Icon": "Images/sessionIcon",
+      "PropertyInspectorPath": "global_pi.html",
       "Tooltip": "Display session 1 status and activate window on press",
       "States": [
         {
@@ -44,13 +45,13 @@
           "FontSize": "11"
         }
       ],
-      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
       "Name": "Session 2",
       "UUID": "com.user.antigravity.session_slot_2",
       "Icon": "Images/sessionIcon",
+      "PropertyInspectorPath": "global_pi.html",
       "Tooltip": "Display session 2 status and activate window on press",
       "States": [
         {
@@ -59,13 +60,13 @@
           "FontSize": "11"
         }
       ],
-      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
       "Name": "Session 3",
       "UUID": "com.user.antigravity.session_slot_3",
       "Icon": "Images/sessionIcon",
+      "PropertyInspectorPath": "global_pi.html",
       "Tooltip": "Display session 3 status and activate window on press",
       "States": [
         {
@@ -74,13 +75,13 @@
           "FontSize": "11"
         }
       ],
-      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
       "Name": "Session 4",
       "UUID": "com.user.antigravity.session_slot_4",
       "Icon": "Images/sessionIcon",
+      "PropertyInspectorPath": "global_pi.html",
       "Tooltip": "Display session 4 status and activate window on press",
       "States": [
         {
@@ -89,13 +90,13 @@
           "FontSize": "11"
         }
       ],
-      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {
       "Name": "Session 5",
       "UUID": "com.user.antigravity.session_slot_5",
       "Icon": "Images/sessionIcon",
+      "PropertyInspectorPath": "global_pi.html",
       "Tooltip": "Display session 5 status and activate window on press",
       "States": [
         {
@@ -104,7 +105,6 @@
           "FontSize": "11"
         }
       ],
-      "PropertyInspectorPath": "PropertyInspector/global_pi.html",
       "Controllers": ["Keypad"]
     },
     {

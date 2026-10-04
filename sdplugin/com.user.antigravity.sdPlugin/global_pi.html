@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Antigravity Settings</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 9pt;
+      color: #9b9b9b;
+      background-color: #2d2d2d;
+      margin: 0;
+      padding: 10px 14px;
+      user-select: none;
+      box-sizing: border-box;
+    }
+    .sdpi-heading {
+      font-size: 9pt;
+      font-weight: 600;
+      color: #d8d8d8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 14px;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #3c3c3c;
+    }
+    .sdpi-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      min-height: 24px;
+    }
+    .sdpi-label {
+      flex: 1;
+      color: #b0b0b0;
+      font-size: 8.5pt;
+      margin-right: 8px;
+    }
+    select, input[type="number"], input[type="text"] {
+      background-color: #1e1e1e;
+      border: 1px solid #3c3c3c;
+      color: #dcdcdc;
+      padding: 3px 6px;
+      border-radius: 3px;
+      font-size: 8.5pt;
+      outline: none;
+      box-sizing: border-box;
+    }
+    select:focus, input:focus {
+      border-color: #0078d7;
+    }
+    select {
+      max-width: 150px;
+      width: 100%;
+    }
+    input[type="number"] {
+      width: 80px;
+      text-align: right;
+    }
+    .sdpi-checkbox-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .sdpi-checkbox-row input[type="checkbox"] {
+      margin-right: 8px;
+      accent-color: #0078d7;
+      cursor: pointer;
+    }
+    .sdpi-checkbox-row label {
+      color: #b0b0b0;
+      font-size: 8.5pt;
+      cursor: pointer;
+    }
+    .sort-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 6px;
+      align-items: center;
+    }
+    .sort-row select {
+      flex: 1;
+    }
+    .sort-badge {
+      font-size: 7.5pt;
+      color: #707070;
+      width: 14px;
+      text-align: center;
+    }
+    .hint {
+      font-size: 7.5pt;
+      color: #777777;
+      margin-top: -4px;
+      margin-bottom: 6px;
+      padding-left: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="sdpi-wrapper">
+    <!-- 並び順設定 -->
+    <div class="sdpi-heading">並び順設定 (ソート基準)</div>
+    
+    <div class="sort-row">
+      <span class="sort-badge">1</span>
+      <select id="sort_field_1">
+        <option value="status" selected>ステータス</option>
+        <option value="updated_at">最終更新日時</option>
+        <option value="title">タイトル</option>
+      </select>
+      <select id="sort_order_1">
+        <option value="false" selected>降順</option>
+        <option value="true">昇順</option>
+      </select>
+    </div>
+
+    <div class="sort-row">
+      <span class="sort-badge">2</span>
+      <select id="sort_field_2">
+        <option value="status">ステータス</option>
+        <option value="updated_at" selected>最終更新日時</option>
+        <option value="title">タイトル</option>
+      </select>
+      <select id="sort_order_2">
+        <option value="false" selected>降順</option>
+        <option value="true">昇順</option>
+      </select>
+    </div>
+
+    <div class="sort-row">
+      <span class="sort-badge">3</span>
+      <select id="sort_field_3">
+        <option value="status">ステータス</option>
+        <option value="updated_at">最終更新日時</option>
+        <option value="title" selected>タイトル</option>
+      </select>
+      <select id="sort_order_3">
+        <option value="true" selected>昇順</option>
+        <option value="false">降順</option>
+      </select>
+    </div>
+    <div class="hint">※ステータス降順: 承認待ち &gt; 作業中 &gt; 完了</div>
+
+    <!-- 非表示・除外設定 -->
+    <div class="sdpi-heading">非表示・除外条件 (フィルタ)</div>
+
+    <!-- 完了セッションの保持期間 -->
+    <div class="sdpi-item">
+      <label class="sdpi-label">完了(DONE)の保持期間</label>
+      <select id="done_retention_select">
+        <option value="0">即時非表示</option>
+        <option value="30">30分間保持</option>
+        <option value="60" selected>1時間保持 (推奨)</option>
+        <option value="1440">24時間保持</option>
+        <option value="4320">3日間保持</option>
+        <option value="-1">無期限で保持</option>
+        <option value="-2">保持期間を入力...</option>
+      </select>
+    </div>
+    <div class="sdpi-item" id="custom_done_retention_wrapper" style="display: none;">
+      <label class="sdpi-label">保持時間 (分)</label>
+      <input type="number" id="custom_done_retention_minutes" min="1" max="525600" value="120" placeholder="分数を入力">
+    </div>
+
+    <!-- 最終更新日の表示上限 -->
+    <div class="sdpi-item">
+      <label class="sdpi-label">最終更新日の表示上限</label>
+      <select id="max_inactivity_select">
+        <option value="0">全期間 (無制限)</option>
+        <option value="1">過去24時間以内</option>
+        <option value="3">過去3日以内</option>
+        <option value="7" selected>過去7日以内 (推奨)</option>
+        <option value="14">過去14日以内</option>
+        <option value="30">過去30日以内</option>
+        <option value="-2">過去日数を入力...</option>
+      </select>
+    </div>
+    <div class="sdpi-item" id="custom_max_inactivity_wrapper" style="display: none;">
+      <label class="sdpi-label">保持上限 (日)</label>
+      <input type="number" id="custom_max_inactivity_days" min="1" max="365" value="10" placeholder="日数を入力">
+    </div>
+
+    <!-- プロセス停止済み除外 -->
+    <div class="sdpi-checkbox-row">
+      <input type="checkbox" id="exclude_inactive_unlocked">
+      <label for="exclude_inactive_unlocked">プロセス停止済みのセッションを除外</label>
+    </div>
+
+    <!-- セッション保護ルール -->
+    <div class="sdpi-heading">セッション保護ルール</div>
+    <div class="sdpi-checkbox-row">
+      <input type="checkbox" id="protect_waiting_sessions" checked>
+      <label for="protect_waiting_sessions">承認待ち(WAITING)を常に保護・表示</label>
+    </div>
+    <div class="sdpi-checkbox-row">
+      <input type="checkbox" id="protect_working_sessions" checked>
+      <label for="protect_working_sessions">実行中(WORKING)を常に保護・表示</label>
+    </div>
+
+    <!-- 表示枠上限 -->
+    <div class="sdpi-heading">最大追跡件数</div>
+    <div class="sdpi-item">
+      <label class="sdpi-label">最大追跡件数 (上限)</label>
+      <input type="number" id="max_tracked_sessions" min="5" max="100" value="20">
+    </div>
+  </div>
+
+  <script>
+    let websocket = null;
+    let pluginUUID = null;
+    let globalSettings = {};
+
+    const PRESET_DONE_MINUTES = ["0", "30", "60", "1440", "4320", "-1"];
+    const PRESET_INACTIVITY_DAYS = ["0", "1", "3", "7", "14", "30"];
+
+    function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+      pluginUUID = inUUID;
+      websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+
+      websocket.onopen = function () {
+        // Register Property Inspector
+        const json = {
+          event: inRegisterEvent,
+          uuid: inUUID
+        };
+        websocket.send(JSON.stringify(json));
+
+        // Request Global Settings
+        requestGlobalSettings();
+      };
+
+      websocket.onmessage = function (evt) {
+        try {
+          const jsonObj = JSON.parse(evt.data);
+          const event = jsonObj.event;
+          const payload = jsonObj.payload || {};
+
+          if (event === "didReceiveGlobalSettings") {
+            const settings = payload.settings || {};
+            globalSettings = settings;
+            updateUIFromSettings(settings);
+          }
+        } catch (e) {
+          console.error("Error parsing message: ", e);
+        }
+      };
+    }
+
+    function requestGlobalSettings() {
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({
+          event: "getGlobalSettings",
+          context: pluginUUID
+        }));
+      }
+    }
+
+    function saveGlobalSettings() {
+      if (!websocket || websocket.readyState !== WebSocket.OPEN) return;
+
+      const settings = buildSettingsFromUI();
+      websocket.send(JSON.stringify({
+        event: "setGlobalSettings",
+        context: pluginUUID,
+        payload: settings
+      }));
+    }
+
+    function updateUIFromSettings(settings) {
+      if (!settings) return;
+
+      // 1. Sort criteria
+      const sortList = settings.sort_criteria || [];
+      if (sortList.length > 0 && sortList[0]) {
+        document.getElementById("sort_field_1").value = sortList[0].field || "status";
+        document.getElementById("sort_order_1").value = sortList[0].ascending ? "true" : "false";
+      }
+      if (sortList.length > 1 && sortList[1]) {
+        document.getElementById("sort_field_2").value = sortList[1].field || "updated_at";
+        document.getElementById("sort_order_2").value = sortList[1].ascending ? "true" : "false";
+      }
+      if (sortList.length > 2 && sortList[2]) {
+        document.getElementById("sort_field_3").value = sortList[2].field || "title";
+        document.getElementById("sort_order_3").value = sortList[2].ascending ? "true" : "false";
+      }
+
+      // 2. DONE retention
+      const doneMin = settings.done_retention_minutes !== undefined ? String(settings.done_retention_minutes) : "60";
+      const doneSelect = document.getElementById("done_retention_select");
+      const doneCustomWrapper = document.getElementById("custom_done_retention_wrapper");
+      const doneCustomInput = document.getElementById("custom_done_retention_minutes");
+
+      if (PRESET_DONE_MINUTES.includes(doneMin)) {
+        doneSelect.value = doneMin;
+        doneCustomWrapper.style.display = "none";
+      } else {
+        doneSelect.value = "-2";
+        doneCustomWrapper.style.display = "flex";
+        doneCustomInput.value = doneMin;
+      }
+
+      // 3. Max inactivity days
+      const inactDays = settings.max_inactivity_days !== undefined ? String(settings.max_inactivity_days) : "7";
+      const inactSelect = document.getElementById("max_inactivity_select");
+      const inactCustomWrapper = document.getElementById("custom_max_inactivity_wrapper");
+      const inactCustomInput = document.getElementById("custom_max_inactivity_days");
+
+      if (PRESET_INACTIVITY_DAYS.includes(inactDays)) {
+        inactSelect.value = inactDays;
+        inactCustomWrapper.style.display = "none";
+      } else {
+        inactSelect.value = "-2";
+        inactCustomWrapper.style.display = "flex";
+        inactCustomInput.value = inactDays;
+      }
+
+      // 4. Checkboxes
+      document.getElementById("exclude_inactive_unlocked").checked = !!settings.exclude_inactive_unlocked;
+      document.getElementById("protect_waiting_sessions").checked = settings.protect_waiting_sessions !== false;
+      document.getElementById("protect_working_sessions").checked = settings.protect_working_sessions !== false;
+
+      // 5. Max tracked sessions
+      document.getElementById("max_tracked_sessions").value = settings.max_tracked_sessions || 20;
+    }
+
+    function buildSettingsFromUI() {
+      // Sort criteria
+      const sortCriteria = [
+        {
+          field: document.getElementById("sort_field_1").value,
+          ascending: document.getElementById("sort_order_1").value === "true"
+        },
+        {
+          field: document.getElementById("sort_field_2").value,
+          ascending: document.getElementById("sort_order_2").value === "true"
+        },
+        {
+          field: document.getElementById("sort_field_3").value,
+          ascending: document.getElementById("sort_order_3").value === "true"
+        }
+      ];
+
+      // Done retention
+      let doneMinutes = parseInt(document.getElementById("done_retention_select").value, 10);
+      if (doneMinutes === -2) {
+        doneMinutes = parseInt(document.getElementById("custom_done_retention_minutes").value, 10) || 60;
+      }
+
+      // Max inactivity
+      let maxDays = parseInt(document.getElementById("max_inactivity_select").value, 10);
+      if (maxDays === -2) {
+        maxDays = parseInt(document.getElementById("custom_max_inactivity_days").value, 10) || 7;
+      }
+
+      const excludeInactive = document.getElementById("exclude_inactive_unlocked").checked;
+      const protectWaiting = document.getElementById("protect_waiting_sessions").checked;
+      const protectWorking = document.getElementById("protect_working_sessions").checked;
+      const maxTracked = parseInt(document.getElementById("max_tracked_sessions").value, 10) || 20;
+
+      return {
+        sort_criteria: sortCriteria,
+        done_retention_minutes: doneMinutes,
+        max_inactivity_days: maxDays,
+        protect_waiting_sessions: protectWaiting,
+        protect_working_sessions: protectWorking,
+        exclude_inactive_unlocked: excludeInactive,
+        max_tracked_sessions: maxTracked
+      };
+    }
+
+    // Event listeners
+    document.addEventListener("DOMContentLoaded", () => {
+      // Toggle custom done retention input
+      const doneSelect = document.getElementById("done_retention_select");
+      const doneCustomWrapper = document.getElementById("custom_done_retention_wrapper");
+      doneSelect.addEventListener("change", () => {
+        if (doneSelect.value === "-2") {
+          doneCustomWrapper.style.display = "flex";
+        } else {
+          doneCustomWrapper.style.display = "none";
+        }
+        saveGlobalSettings();
+      });
+
+      // Toggle custom inactivity days input
+      const inactSelect = document.getElementById("max_inactivity_select");
+      const inactCustomWrapper = document.getElementById("custom_max_inactivity_wrapper");
+      inactSelect.addEventListener("change", () => {
+        if (inactSelect.value === "-2") {
+          inactCustomWrapper.style.display = "flex";
+        } else {
+          inactCustomWrapper.style.display = "none";
+        }
+        saveGlobalSettings();
+      });
+
+      // Auto save on any input change
+      const inputs = document.querySelectorAll("input, select");
+      inputs.forEach(el => {
+        el.addEventListener("change", () => {
+          saveGlobalSettings();
+        });
+      });
+    });
+  </script>
+</body>
+</html>
+

@@ -25,17 +25,11 @@ except ImportError:
     websockets = None  # type: ignore
 
 from src.antigravity_monitor.collector import DataCollector
+from src.antigravity_monitor.config import DEFAULT_CONFIG_PATH, ConversationListConfig
 from src.antigravity_monitor.image_generator import (
     generate_hub_rocket_svg,
     generate_key_svg,
     svg_to_data_uri,
-)
-from src.antigravity_monitor.monitor_config import (
-    MonitorConfig,
-    _validate_sort_criteria,
-    _validate_timeout,
-    load_monitor_config,
-    save_monitor_config,
 )
 from src.antigravity_monitor.session_page_manager import (
     KeyRenderData,
@@ -62,20 +56,23 @@ class StreamDeckBridge:
         info: dict[str, Any] | None = None,
         state_store: StateStore | None = None,
         collector: DataCollector | None = None,
-        config: MonitorConfig | None = None,
         config_path: Path | str | None = None,
     ) -> None:
         self.port = port
         self.plugin_uuid = plugin_uuid
         self.register_event = register_event
         self.info = info or {}
-        self.config_path = config_path
-        self.config = config or load_monitor_config(config_path=self.config_path)
+        self.config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+
+        # Load local initial configuration (Dual Persistence)
+        initial_config = ConversationListConfig.load_from_file(self.config_path)
 
         # Shared StateStore and dedicated background collector
-        self.state_store = state_store or StateStore()
+        self.state_store = state_store or StateStore(config=initial_config)
         self.collector = collector or DataCollector(state_store=self.state_store)
-        self.page_manager = SessionPageManager(state_store=self.state_store, config=self.config)
+        self.page_manager = SessionPageManager(
+            state_store=self.state_store, config=initial_config
+        )
 
         self.ws: Any = None
         # Track active contexts: context -> dict(action, coordinates, settings)
@@ -115,6 +112,17 @@ class StreamDeckBridge:
             }
             await ws.send(json.dumps(registration))
             logger.info("Registered plugin %s with Stream Deck", self.plugin_uuid)
+
+            # Query global settings from Stream Deck
+            await ws.send(
+                json.dumps(
+                    {
+                        "event": "getGlobalSettings",
+                        "context": self.plugin_uuid,
+                    }
+                )
+            )
+            logger.info("Requested Global Settings from Stream Deck")
 
             # Start lightweight UI render loop (reads from memory, skips unchanged keys)
             render_task = asyncio.create_task(self._ui_render_loop())
@@ -227,28 +235,6 @@ class StreamDeckBridge:
 
         self._rendered_key_cache[context] = cache_key
 
-    def _apply_settings(self, settings: dict[str, Any]) -> None:
-        """Apply dynamic settings received from Stream Deck."""
-        if not isinstance(settings, dict):
-            return
-        updated_global = False
-        if "hub_done_timeout_seconds" in settings:
-            new_timeout = _validate_timeout(settings.get("hub_done_timeout_seconds"))
-            self.config.hub_done_timeout_seconds = new_timeout
-            logger.info("Updated hub_done_timeout_seconds from settings: %s", new_timeout)
-
-        if "sort_criteria" in settings:
-            new_criteria = _validate_sort_criteria(settings.get("sort_criteria"))
-            self.config.sort_criteria = new_criteria
-            updated_global = True
-            logger.info("Updated sort_criteria from settings: %s", new_criteria)
-
-        if updated_global:
-            try:
-                save_monitor_config(self.config, config_path=self.config_path)
-            except Exception as e:
-                logger.warning("Failed to save monitor config: %s", e)
-
     async def handle_streamdeck_event(self, data: dict[str, Any]) -> None:
         """Handle incoming Stream Deck event."""
         event = data.get("event")
@@ -258,12 +244,10 @@ class StreamDeckBridge:
         coords = payload.get("coordinates", {})
 
         if event == "willAppear":
-            settings = payload.get("settings", {})
-            self._apply_settings(settings)
             self.active_contexts[context] = {
                 "action": action,
                 "coordinates": coords,
-                "settings": settings,
+                "settings": payload.get("settings", {}),
             }
             self._rendered_key_cache.pop(context, None)
             await self.update_all_keys(force=True)
@@ -272,16 +256,52 @@ class StreamDeckBridge:
             self.active_contexts.pop(context, None)
             self._rendered_key_cache.pop(context, None)
 
-        elif event in ("didReceiveSettings", "didReceiveGlobalSettings"):
+        elif event == "keyDown":
+            await self.handle_key_down(
+                context, action, coords, payload.get("settings", {})
+            )
+
+        elif event == "didReceiveGlobalSettings":
             settings = payload.get("settings", {})
-            self._apply_settings(settings)
-            if context in self.active_contexts:
-                self.active_contexts[context]["settings"] = settings
-            self._rendered_key_cache.clear()
+            if settings:
+                config = ConversationListConfig.from_dict(settings)
+                self.state_store.update_config(config)
+                self.page_manager.config = config
+                config.save_to_file(self.config_path)
+                logger.info(
+                    "Updated configuration from Stream Deck Global Settings: %s", config
+                )
+            else:
+                # First time or empty global settings: sync local config to Stream Deck
+                current_config = self.state_store.get_config()
+                if self.ws:
+                    await self.ws.send(
+                        json.dumps(
+                            {
+                                "event": "setGlobalSettings",
+                                "context": self.plugin_uuid,
+                                "payload": current_config.to_dict(),
+                            }
+                        )
+                    )
+                    logger.info(
+                        "Synchronized local configuration to Stream Deck Global Settings."
+                    )
             await self.update_all_keys(force=True)
 
-        elif event == "keyDown":
-            await self.handle_key_down(context, action, coords, payload.get("settings", {}))
+        elif event == "propertyInspectorDidAppear":
+            # Send current global settings to ensure Property Inspector UI is synchronized
+            current_config = self.state_store.get_config()
+            if self.ws:
+                await self.ws.send(
+                    json.dumps(
+                        {
+                            "event": "setGlobalSettings",
+                            "context": self.plugin_uuid,
+                            "payload": current_config.to_dict(),
+                        }
+                    )
+                )
 
     async def handle_key_down(
         self,
@@ -295,7 +315,9 @@ class StreamDeckBridge:
         row = coords.get("row", -1)
         suffix = action.split(".")[-1]
 
-        logger.info("Key down: action=%s, suffix=%s, coords=(%s, %s)", action, suffix, col, row)
+        logger.info(
+            "Key down: action=%s, suffix=%s, coords=(%s, %s)", action, suffix, col, row
+        )
 
         # 1. Hub: Focus the primary (highest-priority) session window
         if suffix == "summary_hub":
@@ -333,7 +355,10 @@ class StreamDeckBridge:
                 # If 1-based (session_slot_1..5), map to 0..4
                 slot_index = num - 1 if num in (1, 2, 3, 4, 5) else num
 
-        if slot_index is not None and 0 <= slot_index < self.page_manager.items_per_page:
+        if (
+            slot_index is not None
+            and 0 <= slot_index < self.page_manager.items_per_page
+        ):
             session = self.page_manager.get_session_by_slot(slot_index)
             if session:
                 logger.info(
@@ -571,7 +596,9 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--server", action="store_true", help="Run interactive simulator HTTP server"
     )
-    parser.add_argument("--server-port", type=int, default=18500, help="Simulator server port")
+    parser.add_argument(
+        "--server-port", type=int, default=18500, help="Simulator server port"
+    )
     return parser.parse_args()
 
 
