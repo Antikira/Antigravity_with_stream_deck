@@ -205,6 +205,9 @@ class SessionDetector:
         self._actively_tracked_ids: set[str] = set()
         self._initial_scan_done = False
 
+        # Performance caches
+        self._transcript_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
     def get_presence_locked_ids(self) -> set[str]:
         """Return set of conversation IDs that currently have presence lock files."""
         if not self.presence_dir.is_dir():
@@ -221,6 +224,10 @@ class SessionDetector:
         cid_db = self.conversations_dir / f"{conversation_id}.db"
         if not cid_db.is_file():
             return {}
+
+        # DO NOT USE mtime FOR SQLITE FILES in WAL mode, as the `-wal` file can be updated
+        # without changing the main file's mtime. We just skip caching here.
+
         try:
             uri = f"file:{cid_db.as_posix()}?mode=ro"
             con = sqlite3.connect(uri, uri=True, timeout=0.5)
@@ -237,6 +244,7 @@ class SessionDetector:
                 }
         except Exception:
             pass
+
         return {}
 
     def inspect_transcript(self, conversation_id: str) -> dict[str, Any]:
@@ -245,6 +253,14 @@ class SessionDetector:
             self.brain_dir / conversation_id / ".system_generated" / "logs" / "transcript.jsonl"
         )
         if not transcript_path.is_file():
+            return {}
+
+        try:
+            mtime = transcript_path.stat().st_mtime
+            cached = self._transcript_cache.get(conversation_id)
+            if cached and cached[0] == mtime:
+                return cached[1]
+        except FileNotFoundError:
             return {}
 
         try:
@@ -263,11 +279,21 @@ class SessionDetector:
             # Parse from the last line backwards until a valid JSON step is found
             for line in reversed(lines):
                 try:
-                    return json.loads(line)
+                    result = json.loads(line)
+                    self._transcript_cache[conversation_id] = (mtime, result)
+                    return result
                 except Exception:
                     continue
+
+            self._transcript_cache[conversation_id] = (mtime, {})
             return {}
         except Exception:
+            # Note: mtime is guaranteed to be bound if we reach here
+            # because the first thing we do in the main try block is stat() and
+            # we handle FileNotFoundError there. If the main try block throws
+            # another exception, mtime may not be bound, so we check for its existence.
+            if "mtime" in locals():
+                self._transcript_cache[conversation_id] = (mtime, {})
             return {}
 
     def determine_status(
@@ -350,6 +376,7 @@ class SessionDetector:
 
         locked_ids = self.get_presence_locked_ids()
         sessions: list[SessionInfo] = []
+        seen_cids: set[str] = set()
 
         try:
             # Connect in read-only URI mode to avoid locking
@@ -386,6 +413,8 @@ class SessionDetector:
                 raw_status = row[6] or ""
                 parent_cid = row[7] or ""
                 not_fully_idle = row[8] or 0
+
+                seen_cids.add(cid)
 
                 try:
                     workspace_uris = json.loads(ws_raw) if isinstance(ws_raw, str) else []
@@ -431,5 +460,8 @@ class SessionDetector:
         except Exception as e:
             # Fallback or error logging
             print(f"[SessionDetector] Error querying sessions: {e}")
+
+        # Clean up unbounded cache for sessions no longer seen in current scan
+        self._transcript_cache = {k: v for k, v in self._transcript_cache.items() if k in seen_cids}
 
         return sessions
