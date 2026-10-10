@@ -6,8 +6,8 @@ without requiring external image processing libraries like Pillow.
 
 from __future__ import annotations
 
+import base64
 import html
-import urllib.parse
 
 
 def generate_key_svg(
@@ -288,6 +288,6 @@ def generate_hub_rocket_svg(status: str = "empty") -> str:
 
 
 def svg_to_data_uri(svg: str) -> str:
-    """Convert SVG string to a data URI for Stream Deck setImage."""
-    encoded = urllib.parse.quote(svg)
-    return f"data:image/svg+xml;charset=utf8,{encoded}"
+    """Convert an SVG string to a data URI."""
+    b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+    return f"data:image/svg+xml;base64,{b64}"

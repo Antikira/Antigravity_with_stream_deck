@@ -431,6 +431,23 @@ def test_ignore_preexisting_done_filtering(mock_antigravity_env: Path):
 # ---------------------------------------------------------------------------
 
 
+def test_svg_to_data_uri():
+    svg = (
+        '<svg width="100" height="100">'
+        '<circle cx="50" cy="50" r="40" stroke="green" stroke-width="4" fill="yellow" />'
+        "</svg>"
+    )
+    data_uri = svg_to_data_uri(svg)
+
+    # Pre-calculated base64 of the exact SVG above
+    expected_b64 = (
+        "PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCI+PGNpcmNsZSBjeD0iNTAiIGN5PSI1M"
+        "CIgcj0iNDAiIHN0cm9rZT0iZ3JlZW4iIHN0cm9rZS13aWR0aD0iNCIgZmlsbD0ieWVsbG"
+        "93IiAvPjwvc3ZnPg=="
+    )
+    assert data_uri == f"data:image/svg+xml;base64,{expected_b64}"
+
+
 def test_image_generator():
     svg = generate_key_svg(
         title="Test Session",
@@ -444,7 +461,7 @@ def test_image_generator():
     assert "稼働中" in svg
 
     data_uri = svg_to_data_uri(svg)
-    assert data_uri.startswith("data:image/svg+xml;charset=utf8,")
+    assert data_uri.startswith("data:image/svg+xml;base64,")
 
 
 def test_hub_rocket_svg_generator():
@@ -460,7 +477,7 @@ def test_hub_rocket_svg_generator():
         assert "<svg" in svg
         assert expected_label in svg
         data_uri = svg_to_data_uri(svg)
-        assert data_uri.startswith("data:image/svg+xml;charset=utf8,")
+        assert data_uri.startswith("data:image/svg+xml;base64,")
 
 
 def test_window_focus_helpers():
