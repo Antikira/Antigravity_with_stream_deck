@@ -126,7 +126,7 @@ class QuotaReader:
         cache_ttl_seconds: float = DEFAULT_TTL_SECONDS,
     ) -> None:
         if base_dir is None:
-            user_profile = os.environ.get("USERPROFILE", os.path.expanduser("~"))
+            user_profile = os.environ.get("USERPROFILE", Path("~").expanduser())
             self.base_dir = Path(user_profile) / ".gemini" / "antigravity"
         else:
             self.base_dir = Path(base_dir)
