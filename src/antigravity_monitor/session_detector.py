@@ -265,7 +265,7 @@ class SessionDetector:
 
         try:
             # Read last lines efficiently with adequate buffer for tool calls / thinking
-            with open(transcript_path, "rb") as f:
+            with transcript_path.open("rb") as f:
                 f.seek(0, os.SEEK_END)
                 size = f.tell()
                 chunk_size = min(size, 65536)
