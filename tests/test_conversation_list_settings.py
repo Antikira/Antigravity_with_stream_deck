@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 
 from src.antigravity_monitor.config import (
     ConversationListConfig,
+    HubConfig,
     filter_and_sort_sessions,
     is_session_visible,
     parse_session_datetime,
@@ -40,6 +41,57 @@ def _make_session(
 
 
 # ----------------------------------------------------------------------
+# 0. HubConfig Tests
+# ----------------------------------------------------------------------
+
+def test_hubconfig_from_settings():
+    # Test None and empty dict
+    assert HubConfig.from_settings(None).hub_done_timeout_seconds == 300.0
+    assert HubConfig.from_settings({}).hub_done_timeout_seconds == 300.0
+
+    # Test valid configuration
+    valid_settings = {
+        "hub_done_timeout_seconds": 120.5,
+        "hub_sort_criteria": [
+            {"field": "status", "ascending": True},
+            {"field": "updated_at", "ascending": False}
+        ]
+    }
+    cfg_valid = HubConfig.from_settings(valid_settings)
+    assert cfg_valid.hub_done_timeout_seconds == 120.5
+    assert cfg_valid.is_hub_done_timeout_enabled is True
+    assert len(cfg_valid.hub_sort_criteria) == 2
+    assert cfg_valid.hub_sort_criteria[0]["field"] == "status"
+    assert cfg_valid.hub_sort_criteria[0]["ascending"] is True
+
+    # Test explicit None for timeout (disables timeout)
+    cfg_none_timeout = HubConfig.from_settings({"hub_done_timeout_seconds": None})
+    assert cfg_none_timeout.hub_done_timeout_seconds is None
+    assert cfg_none_timeout.is_hub_done_timeout_enabled is False
+
+    # Test invalid timeout (string, negative)
+    cfg_invalid_timeout = HubConfig.from_settings({"hub_done_timeout_seconds": "invalid"})
+    assert cfg_invalid_timeout.hub_done_timeout_seconds is None
+
+    cfg_negative = HubConfig.from_settings({"hub_done_timeout_seconds": -10.0})
+    assert cfg_negative.hub_done_timeout_seconds is None
+
+    # Test invalid sort criteria
+    invalid_criteria_settings = {
+        "hub_sort_criteria": [
+            "not a dict",
+            {"field": "invalid_field", "ascending": True},
+            {"field": "title", "ascending": "not a bool"} # "not a bool" evaluates to True in bool()
+        ]
+    }
+    cfg_invalid_sort = HubConfig.from_settings(invalid_criteria_settings)
+    # The valid item will be parsed, invalid ones skipped
+    assert len(cfg_invalid_sort.hub_sort_criteria) == 1
+    assert cfg_invalid_sort.hub_sort_criteria[0]["field"] == "title"
+    assert cfg_invalid_sort.hub_sort_criteria[0]["ascending"] is True
+
+
+# ----------------------------------------------------------------------
 # 1. ConversationListConfig Tests
 # ----------------------------------------------------------------------
 
@@ -54,6 +106,39 @@ def test_parse_session_datetime():
     assert parse_session_datetime(None) is None
     assert parse_session_datetime("") is None
     assert parse_session_datetime("invalid-date") is None
+
+    # Naive datetime
+    naive_dt = datetime(2026, 10, 4, 12, 0)
+    parsed_naive = parse_session_datetime(naive_dt)
+    assert parsed_naive is not None
+    assert parsed_naive.tzinfo == timezone.utc
+
+    # Test DB datetime missing timezone but parsed successfully by _parse_db_datetime
+    db_str_naive = "2026-10-04 12:00:00"
+    parsed_db_naive = parse_session_datetime(db_str_naive)
+    assert parsed_db_naive is not None
+    assert parsed_db_naive.tzinfo == timezone.utc
+
+    # Iso format without timezone handled by fallback
+    from unittest.mock import patch
+    with patch("src.antigravity_monitor.config._parse_db_datetime", return_value=None):
+        iso_str = "2026-10-04T12:00:00"
+        parsed_iso = parse_session_datetime(iso_str)
+        assert parsed_iso is not None
+        assert parsed_iso.tzinfo == timezone.utc
+
+        # Aware fallback
+        iso_str_aware = "2026-10-04T12:00:00+02:00"
+        parsed_iso_aware = parse_session_datetime(iso_str_aware)
+        assert parsed_iso_aware is not None
+        assert parsed_iso_aware.tzinfo == timezone.utc
+
+    # Timezone-aware datetime not in UTC
+    aware_dt = datetime(2026, 10, 4, 12, 0, tzinfo=timezone(timedelta(hours=2)))
+    parsed_aware = parse_session_datetime(aware_dt)
+    assert parsed_aware is not None
+    assert parsed_aware.tzinfo == timezone.utc
+    assert parsed_aware.hour == 10
 
 
 def test_config_defaults():
@@ -88,11 +173,52 @@ def test_config_from_dict_and_clamping():
     assert len(cfg.sort_criteria) == 1
     assert cfg.sort_criteria[0]["field"] == "title"
 
+    # Out of range upper bound for max_tracked_sessions
+    raw2 = {
+        "done_retention_minutes": -5, # Clamped to -1
+        "max_inactivity_days": 400, # Clamped to 365
+        "max_tracked_sessions": 150 # Clamped to 100
+    }
+    cfg2 = ConversationListConfig.from_dict(raw2)
+    assert cfg2.done_retention_minutes == -1
+    assert cfg2.max_inactivity_days == 365
+    assert cfg2.max_tracked_sessions == 100
+
     # Fallback on empty or invalid data
     cfg_empty = ConversationListConfig.from_dict({})
     assert cfg_empty.done_retention_minutes == 60
     assert len(cfg_empty.sort_criteria) == 3
 
+    # Test ValueError / TypeError inputs
+    raw_invalid = {
+        "done_retention_minutes": "invalid",
+        "max_inactivity_days": "invalid",
+        "max_tracked_sessions": "invalid",
+        "sort_criteria": "not a list"
+    }
+    cfg_invalid = ConversationListConfig.from_dict(raw_invalid)
+    assert cfg_invalid.done_retention_minutes == 60
+    assert cfg_invalid.max_inactivity_days == 7
+    assert cfg_invalid.max_tracked_sessions == 20
+    assert len(cfg_invalid.sort_criteria) == 3
+
+
+def test_config_file_persistence_exceptions(tmp_path: Path):
+    # Test load from non-existent file
+    non_existent = tmp_path / "does_not_exist.json"
+    cfg = ConversationListConfig.load_from_file(non_existent)
+    assert cfg.done_retention_minutes == 60
+
+    # Test load from invalid JSON
+    invalid_json = tmp_path / "invalid.json"
+    invalid_json.write_text("{invalid json")
+    cfg_invalid = ConversationListConfig.load_from_file(invalid_json)
+    assert cfg_invalid.done_retention_minutes == 60
+
+    # Test save to invalid path (e.g., trying to write to a directory as a file)
+    invalid_path = tmp_path / "somedir"
+    invalid_path.mkdir()
+    cfg.save_to_file(invalid_path)  # Should catch Exception and log error, not raise
 
 def test_config_file_persistence(tmp_path: Path):
     cfg_file = tmp_path / "conversation_settings.json"
@@ -113,6 +239,21 @@ def test_config_file_persistence(tmp_path: Path):
 # ----------------------------------------------------------------------
 # 2. Session Visibility Filtering Tests
 # ----------------------------------------------------------------------
+
+
+def test_visibility_now_parameter_handling():
+    cfg = ConversationListConfig()
+
+    # Session updated now in UTC
+    now_utc = datetime.now(timezone.utc)
+    sess = _make_session("s1", status=SessionStatus.DONE, updated_at=now_utc.isoformat())
+
+    # Should handle naive 'now'
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    assert is_session_visible(sess, cfg, now=now_naive) is True
+
+    # Should handle 'now=None' by generating its own UTC aware now
+    assert is_session_visible(sess, cfg, now=None) is True
 
 
 def test_visibility_exclude_inactive_unlocked():
