@@ -25,7 +25,7 @@ except ImportError:
     websockets = None  # type: ignore
 
 from src.antigravity_monitor.collector import DataCollector
-from src.antigravity_monitor.config import DEFAULT_CONFIG_PATH, ConversationListConfig
+from src.antigravity_monitor.config import ConversationListConfig
 from src.antigravity_monitor.image_generator import (
     generate_hub_rocket_svg,
     generate_key_svg,
@@ -56,16 +56,14 @@ class StreamDeckBridge:
         info: dict[str, Any] | None = None,
         state_store: StateStore | None = None,
         collector: DataCollector | None = None,
-        config_path: Path | str | None = None,
     ) -> None:
         self.port = port
         self.plugin_uuid = plugin_uuid
         self.register_event = register_event
         self.info = info or {}
-        self.config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
 
-        # Load local initial configuration (Dual Persistence)
-        initial_config = ConversationListConfig.load_from_file(self.config_path)
+        # Default configuration until Stream Deck provides global settings
+        initial_config = ConversationListConfig()
 
         # Shared StateStore and dedicated background collector
         self.state_store = state_store or StateStore(config=initial_config)
@@ -275,7 +273,7 @@ class StreamDeckBridge:
                 self.page_manager.config = config
                 logger.info("Updated configuration from Stream Deck Global Settings: %s", config)
             else:
-                # First time or empty global settings: sync local config to Stream Deck
+                # First time or empty global settings: sync default config to Stream Deck
                 current_config = self.state_store.get_config()
                 if self.ws:
                     await self.ws.send(
@@ -287,7 +285,9 @@ class StreamDeckBridge:
                             }
                         )
                     )
-                    logger.info("Synchronized local configuration to Stream Deck Global Settings.")
+                    logger.info(
+                        "Synchronized default configuration to Stream Deck Global Settings."
+                    )
             await self.update_all_keys(force=True)
 
         elif event == "propertyInspectorDidAppear":

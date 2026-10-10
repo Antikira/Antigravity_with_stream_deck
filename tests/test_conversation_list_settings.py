@@ -319,14 +319,12 @@ def test_state_store_update_config():
 # ----------------------------------------------------------------------
 
 
-def test_bridge_did_receive_global_settings(tmp_path: Path):
+def test_bridge_did_receive_global_settings():
     async def _run():
-        cfg_file = tmp_path / "test_settings.json"
         bridge = StreamDeckBridge(
             port=12345,
             plugin_uuid="test_uuid",
             register_event="registerPlugin",
-            config_path=cfg_file,
         )
 
         # Simulate didReceiveGlobalSettings with new configuration
@@ -352,18 +350,17 @@ def test_bridge_did_receive_global_settings(tmp_path: Path):
     asyncio.run(_run())
 
 
-def test_bridge_syncs_local_config_when_global_empty(tmp_path: Path):
+def test_bridge_syncs_default_config_when_global_empty():
     async def _run():
-        cfg_file = tmp_path / "test_settings.json"
-        local_cfg = ConversationListConfig(done_retention_minutes=120)
-        local_cfg.save_to_file(cfg_file)
-
         bridge = StreamDeckBridge(
             port=12345,
             plugin_uuid="test_uuid",
             register_event="registerPlugin",
-            config_path=cfg_file,
         )
+
+        # Inject config directly into StateStore to simulate existing config
+        local_cfg = ConversationListConfig(done_retention_minutes=120)
+        bridge.state_store.update_config(local_cfg)
 
         mock_ws = AsyncMock()
         bridge.ws = mock_ws
