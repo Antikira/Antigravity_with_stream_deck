@@ -206,6 +206,11 @@ class QuotaReader:
             kwargs = {}
             if sys.platform == "win32":
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                if hasattr(subprocess, "STARTUPINFO"):
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+                    startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                    kwargs["startupinfo"] = startupinfo
 
             result = subprocess.run(
                 ["agy", "-p", "/usage"],

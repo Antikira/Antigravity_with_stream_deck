@@ -276,6 +276,11 @@ def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
             assert kwargs.get("creationflags") == getattr(
                 subprocess, "CREATE_NO_WINDOW", 0x08000000
             )
+            if hasattr(subprocess, "STARTUPINFO"):
+                startupinfo = kwargs.get("startupinfo")
+                assert startupinfo is not None
+                assert startupinfo.dwFlags & getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+                assert startupinfo.wShowWindow == getattr(subprocess, "SW_HIDE", 0)
 
     with patch(
         "src.antigravity_monitor.quota_reader.subprocess.run", return_value=FakeResult()
