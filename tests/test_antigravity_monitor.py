@@ -21,7 +21,7 @@ from src.antigravity_monitor.quota_reader import (
     _format_tokens,
     _parse_iso_datetime,
 )
-from src.antigravity_monitor.session_detector import SessionDetector, SessionStatus
+from src.antigravity_monitor.session_detector import SessionDetector, SessionStatus, _parse_db_datetime
 from src.antigravity_monitor.session_page_manager import SessionPageManager
 from src.antigravity_monitor.window_focus import WindowFocusManager
 
@@ -481,6 +481,28 @@ def test_token_helpers():
     dt = _parse_iso_datetime("2026-10-02T22:38:57.1234567Z")
     assert dt is not None
     assert dt.year == 2026
+
+
+def test_parse_db_datetime():
+    # Valid strings
+    dt1 = _parse_db_datetime("2026-10-02 22:38:57.0189613+00:00")
+    assert dt1 is not None
+    assert dt1.year == 2026
+    assert dt1.month == 10
+    assert dt1.day == 2
+
+    # Strings without milliseconds
+    dt2 = _parse_db_datetime("2026-10-02T22:38:57+00:00")
+    assert dt2 is not None
+
+    # Empty and whitespace strings
+    assert _parse_db_datetime("") is None
+    assert _parse_db_datetime("   ") is None
+
+    # Invalid strings that trigger exception
+    assert _parse_db_datetime("invalid-datetime-string") is None
+    assert _parse_db_datetime(None) is None
+    assert _parse_db_datetime("2026-10-02 22:38:57.invalid+00:00") is None
 
 
 # ---------------------------------------------------------------------------
