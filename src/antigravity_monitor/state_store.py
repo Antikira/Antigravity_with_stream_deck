@@ -6,6 +6,7 @@ WebSocket event handling (main asyncio event loop).
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from dataclasses import dataclass, field
@@ -75,10 +76,8 @@ class StateStore:
             listeners = list(self._listeners)
 
         for listener in listeners:
-            try:
+            with contextlib.suppress(Exception):
                 listener(snapshot)
-            except Exception:
-                pass
         return changed
 
     def add_listener(self, callback: Callable[[MonitorSnapshot], None]) -> None:
@@ -125,10 +124,8 @@ class StateStore:
 
         # Notify listeners outside the lock
         for listener in listeners:
-            try:
+            with contextlib.suppress(Exception):
                 listener(snapshot)
-            except Exception:
-                pass
 
         return True
 
@@ -152,10 +149,8 @@ class StateStore:
 
         # Notify listeners outside lock
         for listener in listeners:
-            try:
+            with contextlib.suppress(Exception):
                 listener(snapshot)
-            except Exception:
-                pass
 
         return True
 
