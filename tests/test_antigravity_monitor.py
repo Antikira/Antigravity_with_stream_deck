@@ -847,3 +847,92 @@ def test_streamdeck_bridge_dirty_render_cache():
         assert bridge.ws.send.call_count == 6
 
     asyncio.run(_test_body())
+
+
+def test_inspect_transcript_caching(tmp_path: Path):
+    base_dir = tmp_path / "antigravity"
+    log_dir = base_dir / "brain" / "cid_cache_test" / ".system_generated" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    transcript_file = log_dir / "transcript.jsonl"
+
+    step_1 = json.dumps({"type": "PLANNER_RESPONSE", "status": "WORKING"}) + "\n"
+    transcript_file.write_text(step_1, encoding="utf-8")
+
+    detector = SessionDetector(base_dir=base_dir)
+
+    # First call: cache miss, reads from disk
+    result1 = detector.inspect_transcript("cid_cache_test")
+    assert result1.get("status") == "WORKING"
+    assert "cid_cache_test" in detector._transcript_cache
+    cached_mtime, cached_data = detector._transcript_cache["cid_cache_test"]
+    assert cached_data == result1
+
+    # Second call with unchanged mtime: returns from cache
+    # Verify by temporarily mutating cache to confirm it's used
+    detector._transcript_cache["cid_cache_test"] = (
+        cached_mtime,
+        {"type": "PLANNER_RESPONSE", "status": "CACHED"},
+    )
+    result2 = detector.inspect_transcript("cid_cache_test")
+    assert result2.get("status") == "CACHED"
+
+    # Update file with new content and newer mtime
+    import time
+
+    time.sleep(0.05)
+    step_2 = json.dumps({"type": "PLANNER_RESPONSE", "status": "DONE"}) + "\n"
+    transcript_file.write_text(step_1 + step_2, encoding="utf-8")
+
+    result3 = detector.inspect_transcript("cid_cache_test")
+    assert result3.get("status") == "DONE"
+    assert detector._transcript_cache["cid_cache_test"][1]["status"] == "DONE"
+
+
+def test_list_sessions_transcript_cache_retention(tmp_path: Path):
+    base_dir = tmp_path / "antigravity"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    db_path = base_dir / "conversation_summaries.db"
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute("""
+        CREATE TABLE conversation_summaries (
+            conversation_id TEXT PRIMARY KEY,
+            title TEXT,
+            preview TEXT,
+            step_count INTEGER,
+            last_modified_time TEXT,
+            workspace_uris TEXT,
+            status TEXT,
+            parent_conversation_id TEXT,
+            not_fully_idle INTEGER
+        )
+    """)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cur.execute(
+        """
+        INSERT INTO conversation_summaries VALUES
+        ('cid_active', 'Active Session', '', 1, ?, '[]', 'CASCADE_RUN_STATUS_RUNNING', '', 1),
+        ('cid_past', 'Past Session', '', 1, '2020-01-01T00:00:00Z', '[]', 'DONE', '', 0)
+    """,
+        (now_iso,),
+    )
+    con.commit()
+    con.close()
+
+    # Create transcripts for both
+    for cid in ("cid_active", "cid_past"):
+        ldir = base_dir / "brain" / cid / ".system_generated" / "logs"
+        ldir.mkdir(parents=True, exist_ok=True)
+        (ldir / "transcript.jsonl").write_text(
+            json.dumps({"type": "PLANNER_RESPONSE", "status": "DONE"}) + "\n",
+            encoding="utf-8",
+        )
+
+    detector = SessionDetector(base_dir=base_dir, ignore_preexisting_done=True)
+    sessions = detector.list_sessions()
+
+    # cid_past was ignored in output list due to ignore_preexisting_done
+    assert [s.conversation_id for s in sessions] == ["cid_active"]
+    # But both cids were examined in query, so both should be in cache
+    assert "cid_active" in detector._transcript_cache
+    assert "cid_past" in detector._transcript_cache

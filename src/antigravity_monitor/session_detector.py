@@ -292,7 +292,7 @@ class SessionDetector:
             # because the first thing we do in the main try block is stat() and
             # we handle FileNotFoundError there. If the main try block throws
             # another exception, mtime may not be bound, so we check for its existence.
-            if 'mtime' in locals():
+            if "mtime" in locals():
                 self._transcript_cache[conversation_id] = (mtime, {})
             return {}
 
@@ -376,7 +376,7 @@ class SessionDetector:
 
         locked_ids = self.get_presence_locked_ids()
         sessions: list[SessionInfo] = []
-        active_cids_this_run = set()
+        seen_cids: set[str] = set()
 
         try:
             # Connect in read-only URI mode to avoid locking
@@ -414,6 +414,8 @@ class SessionDetector:
                 parent_cid = row[7] or ""
                 not_fully_idle = row[8] or 0
 
+                seen_cids.add(cid)
+
                 try:
                     workspace_uris = json.loads(ws_raw) if isinstance(ws_raw, str) else []
                 except Exception:
@@ -439,8 +441,6 @@ class SessionDetector:
                 if self.ignore_preexisting_done and (cid not in self._actively_tracked_ids):
                     continue
 
-                active_cids_this_run.add(cid)
-
                 session = SessionInfo(
                     conversation_id=cid,
                     title=title,
@@ -461,10 +461,7 @@ class SessionDetector:
             # Fallback or error logging
             print(f"[SessionDetector] Error querying sessions: {e}")
 
-        # Clean up unbounded cache
-        self._transcript_cache = {
-            k: v for k, v in self._transcript_cache.items()
-            if k in active_cids_this_run
-        }
+        # Clean up unbounded cache for sessions no longer seen in current scan
+        self._transcript_cache = {k: v for k, v in self._transcript_cache.items() if k in seen_cids}
 
         return sessions
