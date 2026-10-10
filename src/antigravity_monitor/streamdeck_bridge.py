@@ -25,7 +25,7 @@ except ImportError:
     websockets = None  # type: ignore
 
 from src.antigravity_monitor.collector import DataCollector
-from src.antigravity_monitor.config import DEFAULT_CONFIG_PATH, ConversationListConfig
+from src.antigravity_monitor.config import ConversationListConfig
 from src.antigravity_monitor.image_generator import (
     generate_hub_rocket_svg,
     generate_key_svg,
@@ -56,16 +56,14 @@ class StreamDeckBridge:
         info: dict[str, Any] | None = None,
         state_store: StateStore | None = None,
         collector: DataCollector | None = None,
-        config_path: Path | str | None = None,
     ) -> None:
         self.port = port
         self.plugin_uuid = plugin_uuid
         self.register_event = register_event
         self.info = info or {}
-        self.config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
 
-        # Load local initial configuration (Dual Persistence)
-        initial_config = ConversationListConfig.load_from_file(self.config_path)
+        # Default configuration until Stream Deck provides global settings
+        initial_config = ConversationListConfig()
 
         # Shared StateStore and dedicated background collector
         self.state_store = state_store or StateStore(config=initial_config)
@@ -167,7 +165,10 @@ class StreamDeckBridge:
             row = coords.get("row", 0)
 
             target_key = self.page_manager.get_key_data_by_action_id(
-                action_id=action, col=col, row=row
+                action_id=action,
+                col=col,
+                row=row,
+                settings=ctx_info.get("settings", {}),
             )
             if target_key:
                 await self._render_key_to_streamdeck(context, target_key, force=force)
@@ -257,6 +258,13 @@ class StreamDeckBridge:
         elif event == "keyDown":
             await self.handle_key_down(context, action, coords, payload.get("settings", {}))
 
+        elif event == "didReceiveSettings":
+            settings = payload.get("settings", {})
+            if context in self.active_contexts:
+                self.active_contexts[context]["settings"] = settings
+            self._rendered_key_cache.pop(context, None)
+            await self.update_all_keys(force=True)
+
         elif event == "didReceiveGlobalSettings":
             settings = payload.get("settings", {})
             if settings:
@@ -265,7 +273,7 @@ class StreamDeckBridge:
                 self.page_manager.config = config
                 logger.info("Updated configuration from Stream Deck Global Settings: %s", config)
             else:
-                # First time or empty global settings: sync local config to Stream Deck
+                # First time or empty global settings: sync default config to Stream Deck
                 current_config = self.state_store.get_config()
                 if self.ws:
                     await self.ws.send(
@@ -277,7 +285,9 @@ class StreamDeckBridge:
                             }
                         )
                     )
-                    logger.info("Synchronized local configuration to Stream Deck Global Settings.")
+                    logger.info(
+                        "Synchronized default configuration to Stream Deck Global Settings."
+                    )
             await self.update_all_keys(force=True)
 
         elif event == "propertyInspectorDidAppear":
@@ -310,7 +320,7 @@ class StreamDeckBridge:
 
         # 1. Hub: Focus the primary (highest-priority) session window
         if suffix == "summary_hub":
-            primary = self.page_manager.get_primary_session()
+            primary = self.page_manager.get_primary_session(settings=settings)
             if primary:
                 logger.info(
                     "Hub clicked: Focusing primary session %s (%s)",

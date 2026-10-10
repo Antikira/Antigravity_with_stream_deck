@@ -22,9 +22,16 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
-from src.antigravity_monitor.config import ConversationListConfig, filter_and_sort_sessions
+from src.antigravity_monitor.config import (
+    ConversationListConfig,
+    HubConfig,
+    filter_and_sort_sessions,
+    parse_session_datetime,
+    sort_sessions,
+)
 from src.antigravity_monitor.quota_reader import QuotaInfo, QuotaReader
 from src.antigravity_monitor.session_detector import (
     SessionDetector,
@@ -191,7 +198,10 @@ class SessionPageManager:
             return slots[slot_index]
         return None
 
-    def get_primary_session(self) -> SessionInfo | None:
+    def get_primary_session(
+        self,
+        settings: dict[str, Any] | None = None,
+    ) -> SessionInfo | None:
         """Find the highest-priority session across all tracked sessions."""
         all_sessions = [
             self._cached_sessions[cid]
@@ -201,15 +211,18 @@ class SessionPageManager:
         if not all_sessions:
             return None
 
-        waiting = [s for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL]
+        hub_cfg = HubConfig.from_settings(settings)
+        ordered = sort_sessions(all_sessions, hub_cfg.hub_sort_criteria)
+
+        waiting = [s for s in ordered if s.status == SessionStatus.WAITING_FOR_APPROVAL]
         if waiting:
             return waiting[0]
 
-        working = [s for s in all_sessions if s.status == SessionStatus.WORKING]
+        working = [s for s in ordered if s.status == SessionStatus.WORKING]
         if working:
             return working[0]
 
-        return all_sessions[0]
+        return ordered[0]
 
     # ------------------------------------------------------------------
     # Key Builders
@@ -219,8 +232,10 @@ class SessionPageManager:
         self,
         col: int = 0,
         row: int = 2,
+        settings: dict[str, Any] | None = None,
     ) -> KeyRenderData:
-        """Build the 1-button Hub warning light key."""
+        """Build the 1-button Hub warning light key using per-key instance settings."""
+        hub_cfg = HubConfig.from_settings(settings)
         all_sessions = [
             self._cached_sessions[cid]
             for cid in self._tracked_session_ids
@@ -231,9 +246,26 @@ class SessionPageManager:
             1 for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL
         )
         working_count = sum(1 for s in all_sessions if s.status == SessionStatus.WORKING)
-        done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
 
-        primary = self.get_primary_session()
+        if hub_cfg.is_hub_done_timeout_enabled:
+            timeout_sec = hub_cfg.hub_done_timeout_seconds
+            assert timeout_sec is not None
+            now = datetime.now(timezone.utc)
+            active_done_sessions: list[SessionInfo] = []
+            for s in all_sessions:
+                if s.status == SessionStatus.DONE:
+                    dt = parse_session_datetime(s.updated_at)
+                    if dt is not None:
+                        elapsed = (now - dt).total_seconds()
+                        if elapsed <= timeout_sec:
+                            active_done_sessions.append(s)
+                    else:
+                        active_done_sessions.append(s)
+            done_count = len(active_done_sessions)
+        else:
+            done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
+
+        primary = self.get_primary_session(settings=settings)
 
         if waiting_count > 0:
             status = "waiting"
@@ -399,7 +431,7 @@ class SessionPageManager:
 
         # 1. Hub
         if suffix == "summary_hub":
-            return self.build_summary_hub_key_data(col=col, row=row)
+            return self.build_summary_hub_key_data(col=col, row=row, settings=settings)
 
         # 2. Pagination
         if suffix in ("prev_page", "page_prev", "prev_page_corner"):

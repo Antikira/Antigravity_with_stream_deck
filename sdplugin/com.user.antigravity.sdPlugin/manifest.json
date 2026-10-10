@@ -21,7 +21,7 @@
       "Name": "Antigravity Hub (Warning Light)",
       "UUID": "com.user.antigravity.summary_hub",
       "Icon": "Images/hubIcon",
-      "PropertyInspectorPath": "global_pi.html",
+      "PropertyInspectorPath": "hub_pi.html",
       "Tooltip": "Color prioritized warning light (Waiting > Working > Done). Tap to focus primary session.",
       "States": [
         {
