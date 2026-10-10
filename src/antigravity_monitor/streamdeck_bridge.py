@@ -389,7 +389,6 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         """Silence standard request logging."""
-        pass
 
     def do_GET(self) -> None:
         """Handle GET requests."""
