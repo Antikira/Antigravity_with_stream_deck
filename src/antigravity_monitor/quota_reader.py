@@ -200,8 +200,8 @@ class QuotaReader:
         thread = threading.Thread(target=_worker, daemon=True, name="QuotaFetchThread")
         thread.start()
 
-    def _fetch_usage_sync(self) -> dict[str, QuotaInfo]:
-        """Run agy -p /usage synchronously and parse output."""
+    def _run_agy_command(self) -> str | None:
+        """Execute the agy command and return its stdout."""
         try:
             kwargs = {}
             if sys.platform == "win32":
@@ -220,12 +220,13 @@ class QuotaReader:
                 timeout=15.0,
                 **kwargs,
             )
-            output = result.stdout
+            return result.stdout
         except Exception as e:
             logger.debug("Failed running agy -p /usage: %s", e)
-            return {}
+            return None
 
-        now = datetime.now(timezone.utc)
+    def _parse_usage_output(self, output: str, now: datetime) -> dict[str, QuotaInfo]:
+        """Parse the output of the agy command into QuotaInfo objects."""
         stats = {}
         for line in output.strip().split("\n"):
             if not line.strip():
@@ -276,3 +277,12 @@ class QuotaReader:
                     reset_in_seconds=reset_in_seconds,
                 )
         return stats
+
+    def _fetch_usage_sync(self) -> dict[str, QuotaInfo]:
+        """Run agy -p /usage synchronously and parse output."""
+        output = self._run_agy_command()
+        if not output:
+            return {}
+
+        now = datetime.now(timezone.utc)
+        return self._parse_usage_output(output, now)
