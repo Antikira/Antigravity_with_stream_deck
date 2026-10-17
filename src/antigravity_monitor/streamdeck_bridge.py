@@ -412,6 +412,9 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         # Remove port if present
         host_name = host.split(":")[0] if ":" in host else host
         if host_name not in ("127.0.0.1", "localhost"):
+            logger.warning(
+                "Rejected POST request: Invalid Host '%s' from %s", host, self.address_string()
+            )
             self.send_error(403, "Forbidden: Invalid Host")
             return
 
@@ -419,6 +422,11 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         if origin:
             parsed_origin = urllib.parse.urlparse(origin)
             if parsed_origin.hostname not in ("127.0.0.1", "localhost"):
+                logger.warning(
+                    "Rejected POST request: Invalid Origin '%s' from %s",
+                    origin,
+                    self.address_string(),
+                )
                 self.send_error(403, "Forbidden: Invalid Origin")
                 return
 
@@ -427,19 +435,34 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
             # 2. CSRF / Type validation
             content_type = self.headers.get("Content-Type", "")
             if not content_type.startswith("application/json"):
+                logger.warning(
+                    "Rejected POST request: Unsupported Media Type '%s' from %s",
+                    content_type,
+                    self.address_string(),
+                )
                 self.send_error(415, "Unsupported Media Type")
                 return
 
             # 3. DoS validation: Limit payload size to 4KB
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length > 4096:
+                logger.warning(
+                    "Rejected POST request: Payload too large (%d bytes) from %s",
+                    content_length,
+                    self.address_string(),
+                )
                 self.send_error(413, "Payload Too Large")
                 return
 
             try:
                 body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body) if body else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning(
+                    "Rejected POST request: Malformed JSON from %s (%s)",
+                    self.address_string(),
+                    e,
+                )
                 self.send_error(400, "Bad Request: Invalid JSON")
                 return
 
