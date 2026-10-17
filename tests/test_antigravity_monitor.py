@@ -936,3 +936,24 @@ def test_list_sessions_transcript_cache_retention(tmp_path: Path):
     # But both cids were examined in query, so both should be in cache
     assert "cid_active" in detector._transcript_cache
     assert "cid_past" in detector._transcript_cache
+
+
+def test_simulator_http_handler_log_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import MagicMock
+
+    from src.antigravity_monitor.streamdeck_bridge import SimulatorHTTPHandler
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr("src.antigravity_monitor.streamdeck_bridge.logger", mock_logger)
+
+    handler = SimulatorHTTPHandler.__new__(SimulatorHTTPHandler)
+    handler.client_address = ("127.0.0.1", 54321)
+
+    handler.log_message('"%s" %s %s', "GET /api/status HTTP/1.1", "200", "-")
+
+    mock_logger.debug.assert_called_once()
+    args, _ = mock_logger.debug.call_args
+    assert args[0] == '%s - "%s" %s %s'
+    assert args[1] == "127.0.0.1"
+    assert args[2:] == ("GET /api/status HTTP/1.1", "200", "-")
+

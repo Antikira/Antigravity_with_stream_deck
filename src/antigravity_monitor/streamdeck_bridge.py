@@ -388,8 +388,8 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
     bridge: StreamDeckBridge | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
-        """Silence standard request logging."""
-        pass
+        """Delegate standard request logging to logger.debug."""
+        logger.debug("%s - " + format, self.address_string(), *args)
 
     def do_GET(self) -> None:
         """Handle GET requests."""
