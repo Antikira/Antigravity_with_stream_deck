@@ -26,40 +26,12 @@ def generate_key_svg(
     if not title_lines:
         title_lines = [""]
 
-    title_svg_elements = []
     if len(title_lines) == 1:
-        title_svg_elements.append(
-            '<text x="72" y="72" text-anchor="middle" dominant-baseline="middle" '
-            f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="19">'
-            f"{title_lines[0]}</text>"
-        )
+        title_svg_element = _render_single_line_title(title_lines[0])
     elif len(title_lines) == 2:
-        title_svg_elements.append(
-            '<text x="72" y="55" text-anchor="middle" '
-            f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="18">'
-            f"{title_lines[0]}</text>"
-        )
-        title_svg_elements.append(
-            '<text x="72" y="85" text-anchor="middle" '
-            f'fill="#EEEEEE" font-family="Segoe UI, sans-serif" font-size="16">'
-            f"{title_lines[1]}</text>"
-        )
+        title_svg_element = _render_double_line_title(title_lines[0], title_lines[1])
     else:  # 3 or more lines (e.g. Quota key: 5時間枠 / 48% / 955K)
-        title_svg_elements.append(
-            '<text x="72" y="38" text-anchor="middle" '
-            f'fill="#CCCCCC" font-family="Segoe UI, sans-serif" font-size="15">'
-            f"{title_lines[0]}</text>"
-        )
-        title_svg_elements.append(
-            '<text x="72" y="76" text-anchor="middle" '
-            f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="24">'
-            f"{title_lines[1]}</text>"
-        )
-        title_svg_elements.append(
-            '<text x="72" y="112" text-anchor="middle" '
-            f'fill="#E0E0E0" font-family="Segoe UI, sans-serif" font-size="15">'
-            f"{title_lines[2]}</text>"
-        )
+        title_svg_element = _render_multi_line_title(title_lines[0], title_lines[1], title_lines[2])
 
     # Optional status badge indicator at top-right
     badge_svg = ""
@@ -92,7 +64,7 @@ def generate_key_svg(
         '  <rect x="2" y="2" width="140" height="140" rx="18" fill="none" stroke="#FFFFFF" '
         'stroke-width="1.5" opacity="0.25" />\n'
         f"  {badge_svg}\n"
-        f"  {''.join(title_svg_elements)}\n"
+        f"  {title_svg_element}\n"
         f"  {status_bar_svg}\n"
         "</svg>"
     )
@@ -106,6 +78,39 @@ _SVG_HEADER = (
 _STATUS_BAR_RECT = (
     '  <rect x="14" y="110" width="116" height="24" rx="12" fill="#000000" opacity="0.45" />\n'
 )
+
+
+def _render_single_line_title(line: str) -> str:
+    return (
+        '<text x="72" y="72" text-anchor="middle" dominant-baseline="middle" '
+        f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="19">'
+        f"{line}</text>"
+    )
+
+
+def _render_double_line_title(line1: str, line2: str) -> str:
+    return (
+        '<text x="72" y="55" text-anchor="middle" '
+        f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="18">'
+        f"{line1}</text>\n"
+        '  <text x="72" y="85" text-anchor="middle" '
+        f'fill="#EEEEEE" font-family="Segoe UI, sans-serif" font-size="16">'
+        f"{line2}</text>"
+    )
+
+
+def _render_multi_line_title(line1: str, line2: str, line3: str) -> str:
+    return (
+        '<text x="72" y="38" text-anchor="middle" '
+        f'fill="#CCCCCC" font-family="Segoe UI, sans-serif" font-size="15">'
+        f"{line1}</text>\n"
+        '  <text x="72" y="76" text-anchor="middle" '
+        f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="24">'
+        f"{line2}</text>\n"
+        '  <text x="72" y="112" text-anchor="middle" '
+        f'fill="#E0E0E0" font-family="Segoe UI, sans-serif" font-size="15">'
+        f"{line3}</text>"
+    )
 
 
 def generate_hub_rocket_svg(status: str = "empty") -> str:
