@@ -6,6 +6,7 @@ WebSocket event handling (main asyncio event loop).
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,8 @@ from src.antigravity_monitor.config import (
 )
 from src.antigravity_monitor.quota_reader import QuotaInfo
 from src.antigravity_monitor.session_detector import SessionInfo
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -74,17 +77,23 @@ class StateStore:
             snapshot = self._build_snapshot_locked()
             listeners = list(self._listeners)
 
-        for listener in listeners:
-            try:
-                listener(snapshot)
-            except Exception:
-                pass
+        self._notify_listeners(listeners, snapshot)
         return changed
 
     def add_listener(self, callback: Callable[[MonitorSnapshot], None]) -> None:
         """Register a callback invoked whenever state updates."""
         with self._lock:
             self._listeners.append(callback)
+
+    def _notify_listeners(
+        self, listeners: list[Callable[[MonitorSnapshot], None]], snapshot: MonitorSnapshot
+    ) -> None:
+        """Invoke listener callbacks, logging any exceptions without crashing."""
+        for listener in listeners:
+            try:
+                listener(snapshot)
+            except Exception as e:
+                logger.error("Error in StateStore listener %r: %s", listener, e, exc_info=True)
 
     def get_snapshot(self) -> MonitorSnapshot:
         """Return an instantaneous snapshot of current state (0ms, non-blocking)."""
@@ -124,12 +133,7 @@ class StateStore:
                 return False
 
         # Notify listeners outside the lock
-        for listener in listeners:
-            try:
-                listener(snapshot)
-            except Exception:
-                pass
-
+        self._notify_listeners(listeners, snapshot)
         return True
 
     def update_quotas(self, fresh_quotas: dict[str, QuotaInfo]) -> bool:
@@ -151,12 +155,7 @@ class StateStore:
             listeners = list(self._listeners)
 
         # Notify listeners outside lock
-        for listener in listeners:
-            try:
-                listener(snapshot)
-            except Exception:
-                pass
-
+        self._notify_listeners(listeners, snapshot)
         return True
 
     def _build_snapshot_locked(self) -> MonitorSnapshot:
