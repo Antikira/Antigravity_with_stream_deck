@@ -303,6 +303,8 @@ class StreamDeckBridge:
                         }
                     )
                 )
+        else:
+            logger.debug("Unhandled Stream Deck event: %s", event)
 
     async def handle_key_down(
         self,
@@ -643,8 +645,8 @@ def main() -> None:
     if args.info:
         try:
             info_dict = json.loads(args.info)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse Stream Deck -info argument: %s", e)
 
     bridge = StreamDeckBridge(
         port=args.port,
