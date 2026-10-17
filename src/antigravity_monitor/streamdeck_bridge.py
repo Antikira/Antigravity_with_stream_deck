@@ -532,14 +532,17 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
     def handle_api_press(self, data: dict[str, Any]) -> None:
         """Handle key press simulation."""
         key_id = data.get("key_id", "")
+        logger.info("Simulator key press: key_id=%s from %s", key_id, self.address_string())
         mgr = self.bridge.page_manager if self.bridge else SessionPageManager()
 
         action_result = {"status": "ok", "action": key_id}
 
         if key_id == "page_prev":
             mgr.prev_page()
+            logger.info("Simulator: Navigated to prev page (current: %d)", mgr.current_page)
         elif key_id == "page_next":
             mgr.next_page()
+            logger.info("Simulator: Navigated to next page (current: %d)", mgr.current_page)
         elif key_id == "summary_hub":
             primary = mgr.get_primary_session()
             if primary:
@@ -549,6 +552,11 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
                 )
                 action_result["session"] = primary.title
                 action_result["focused"] = focused
+                logger.info(
+                    "Simulator: Focused primary session '%s' (success=%s)",
+                    primary.title,
+                    focused,
+                )
         elif key_id.startswith("session_slot_"):
             slot_part = key_id.replace("session_slot_", "")
             if slot_part.isdigit():
@@ -561,11 +569,19 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
                     )
                     action_result["session"] = session.title
                     action_result["focused"] = focused
+                    logger.info(
+                        "Simulator: Focused session slot %d ('%s', success=%s)",
+                        slot_idx,
+                        session.title,
+                        focused,
+                    )
             else:
                 action_result["status"] = "error"
                 action_result["info"] = "Invalid session slot ID"
+                logger.warning("Simulator: Invalid session slot ID '%s'", slot_part)
         elif key_id.startswith("quota_"):
             if self.bridge and self.bridge.collector:
+                logger.info("Simulator: Requesting quota refresh for key %s", key_id)
                 self.bridge.collector.request_quota_refresh()
 
         body = json.dumps(action_result, ensure_ascii=False).encode("utf-8")
