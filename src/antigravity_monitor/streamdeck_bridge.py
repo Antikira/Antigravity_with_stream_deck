@@ -596,7 +596,7 @@ def parse_cli_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+async def main() -> None:
     """Entry point for the Stream Deck plugin process."""
     args = parse_cli_args()
 
@@ -616,7 +616,7 @@ def main() -> None:
 
     # If launched by Stream Deck (port and pluginUUID provided)
     if args.port and args.pluginUUID:
-        asyncio.run(bridge.connect_and_run())
+        await bridge.connect_and_run()
     else:
         # Standalone simulator mode
         server = run_simulator_server(port=args.server_port, bridge=bridge)
@@ -625,9 +625,9 @@ def main() -> None:
         print("Press Ctrl+C to stop.")
         try:
             while True:
-                import time
-
-                time.sleep(1)
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
         except KeyboardInterrupt:
             print("\nStopping...")
             bridge.collector.stop()
@@ -635,4 +635,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
