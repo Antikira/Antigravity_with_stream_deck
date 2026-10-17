@@ -21,7 +21,11 @@ from src.antigravity_monitor.quota_reader import (
     _format_tokens,
     _parse_iso_datetime,
 )
-from src.antigravity_monitor.session_detector import SessionDetector, SessionStatus, _parse_db_datetime
+from src.antigravity_monitor.session_detector import (
+    SessionDetector,
+    SessionStatus,
+    _parse_db_datetime,
+)
 from src.antigravity_monitor.session_page_manager import SessionPageManager
 from src.antigravity_monitor.window_focus import WindowFocusManager
 
