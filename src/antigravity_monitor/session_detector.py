@@ -16,6 +16,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+_NEGATIVE_STATES = ("DENIED", "REJECTED", "CANCEL", "CANCELLED", "CANCELING", "FAILED", "ERROR")
+
+_WAITING_EXACT = frozenset(
+    (
+        "WAITING",
+        "PENDING",
+        "WAITING_FOR_APPROVAL",
+        "WAITING_FOR_TOOL_APPROVAL",
+        "AWAITING_APPROVAL",
+        "NEEDS_APPROVAL",
+        "REQUIRES_APPROVAL",
+        "APPROVAL_REQUIRED",
+        "WAITING_FOR_CONFIRMATION",
+        "AWAITING_USER_CONFIRMATION",
+        "USER_CONFIRMATION_REQUIRED",
+        "CONFIRMATION_REQUIRED",
+        "WAITING_FOR_USER",
+        "WAITING_FOR_INPUT",
+        "WAITING_FOR_USER_INPUT",
+        "AWAITING_USER_INPUT",
+        "NEEDS_USER_INPUT",
+        "INPUT_REQUIRED",
+        "PERMISSION",
+        "PERMISSION_REQUIRED",
+        "WAITING_FOR_PERMISSION",
+        "AWAITING_PERMISSION",
+        "NEEDS_PERMISSION",
+        "REQUIRES_PERMISSION",
+        "ASK_PERMISSION",
+        "REQUEST_PERMISSION",
+        "CONFIRM",
+        "CONFIRMATION",
+        "CONFIRMING",
+        "REQUESTED_CHANGES",
+    )
+)
+
+_WAITING_PREFIXES = tuple(f"{state}_" for state in _WAITING_EXACT)
+_WAITING_SUFFIXES = tuple(f"_{state}" for state in _WAITING_EXACT)
+_WAITING_KEYWORDS = ("PERMISSION", "APPROVAL", "CONFIRM")
+
 
 class SessionStatus(str, enum.Enum):
     """Execution status of an Antigravity session."""
@@ -99,52 +140,18 @@ def _is_waiting_status(value: Any) -> bool:
         return False
 
     # Negative states that should NOT be considered waiting
-    negative_states = ("DENIED", "REJECTED", "CANCEL", "CANCELLED", "CANCELING", "FAILED", "ERROR")
-    if any(neg in normalized for neg in negative_states):
+    if any(neg in normalized for neg in _NEGATIVE_STATES):
         return False
 
-    waiting_states = (
-        "WAITING",
-        "PENDING",
-        "WAITING_FOR_APPROVAL",
-        "WAITING_FOR_TOOL_APPROVAL",
-        "AWAITING_APPROVAL",
-        "NEEDS_APPROVAL",
-        "REQUIRES_APPROVAL",
-        "APPROVAL_REQUIRED",
-        "WAITING_FOR_CONFIRMATION",
-        "AWAITING_USER_CONFIRMATION",
-        "USER_CONFIRMATION_REQUIRED",
-        "CONFIRMATION_REQUIRED",
-        "WAITING_FOR_USER",
-        "WAITING_FOR_INPUT",
-        "WAITING_FOR_USER_INPUT",
-        "AWAITING_USER_INPUT",
-        "NEEDS_USER_INPUT",
-        "INPUT_REQUIRED",
-        "PERMISSION",
-        "PERMISSION_REQUIRED",
-        "WAITING_FOR_PERMISSION",
-        "AWAITING_PERMISSION",
-        "NEEDS_PERMISSION",
-        "REQUIRES_PERMISSION",
-        "ASK_PERMISSION",
-        "REQUEST_PERMISSION",
-        "CONFIRM",
-        "CONFIRMATION",
-        "CONFIRMING",
-        "REQUESTED_CHANGES",
-    )
-    if any(
-        normalized == state
-        or normalized.endswith(f"_{state}")
-        or normalized.startswith(f"{state}_")
-        for state in waiting_states
-    ):
+    if normalized in _WAITING_EXACT:
         return True
 
     # General keyword matches in composite status strings
-    if "PERMISSION" in normalized or "APPROVAL" in normalized or "CONFIRM" in normalized:
+    if any(kw in normalized for kw in _WAITING_KEYWORDS):
+        return True
+
+    # Check for prefix or suffix via optimized tuple matching
+    if normalized.startswith(_WAITING_PREFIXES) or normalized.endswith(_WAITING_SUFFIXES):
         return True
 
     return False
