@@ -596,8 +596,8 @@ def parse_cli_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def main() -> None:
-    """Entry point for the Stream Deck plugin process."""
+async def async_main() -> None:
+    """Async entry point for the Stream Deck plugin process."""
     args = parse_cli_args()
 
     info_dict = {}
@@ -626,16 +626,21 @@ async def main() -> None:
         try:
             while True:
                 await asyncio.sleep(1)
-        except asyncio.CancelledError:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             pass
-        except KeyboardInterrupt:
+        finally:
             print("\nStopping...")
             bridge.collector.stop()
             server.shutdown()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Entry point for the Stream Deck plugin process."""
     try:
-        asyncio.run(main())
+        asyncio.run(async_main())
     except KeyboardInterrupt:
         pass
+
+
+if __name__ == "__main__":
+    main()
