@@ -247,6 +247,71 @@ class SessionDetector:
 
         return {}
 
+    def inspect_conversations_db_bulk(
+        self, conversation_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Efficiently inspect multiple conversations/<cid>.db files avoiding N+1 queries.
+
+        Uses ATTACH DATABASE to attach up to 10 databases at a time and query them via UNION ALL.
+        """
+        results: dict[str, dict[str, Any]] = {}
+        if not conversation_ids:
+            return results
+
+        batch_size = 10
+        try:
+            con = sqlite3.connect(":memory:", uri=True)
+            for i in range(0, len(conversation_ids), batch_size):
+                batch_cids = conversation_ids[i : i + batch_size]
+                attached = []
+                for idx, cid in enumerate(batch_cids):
+                    db_path = self.conversations_dir / f"{cid}.db"
+                    if db_path.is_file():
+                        db_name = f"db_{idx}"
+                        uri = f"file:{db_path.as_posix()}?mode=ro"
+                        try:
+                            con.execute(f"ATTACH DATABASE '{uri}' AS {db_name}")
+                            attached.append((db_name, cid))
+                        except Exception as e:
+                            print(f"[SessionDetector] Error attaching DB {cid}: {e}")
+                            continue
+
+                if not attached:
+                    continue
+
+                queries = []
+                params = []
+                for db_name, cid in attached:
+                    queries.append(
+                        f"SELECT ? AS cid, step_type, status, permissions "
+                        f"FROM (SELECT * FROM {db_name}.steps ORDER BY idx DESC LIMIT 1)"
+                    )
+                    params.append(cid)
+
+                if queries:
+                    union_query = " UNION ALL ".join(queries)
+                    try:
+                        rows = con.execute(union_query, params).fetchall()
+                        for r in rows:
+                            results[r[0]] = {
+                                "step_type": r[1],
+                                "status": r[2],
+                                "has_permissions": r[3] is not None,
+                            }
+                    except Exception as e:
+                        print(f"[SessionDetector] Error querying bulk DBs: {e}")
+
+                for db_name, _ in attached:
+                    try:
+                        con.execute(f"DETACH DATABASE {db_name}")
+                    except Exception as e:
+                        print(f"[SessionDetector] Error detaching DB {db_name}: {e}")
+            con.close()
+        except Exception as e:
+            print(f"[SessionDetector] Memory DB connection error: {e}")
+
+        return results
+
     def inspect_transcript(self, conversation_id: str) -> dict[str, Any]:
         """Read the last step from transcript.jsonl if available."""
         transcript_path = (
@@ -302,6 +367,7 @@ class SessionDetector:
         not_fully_idle: int | bool,
         last_transcript_step: dict[str, Any],
         conversation_id: str = "",
+        db_step: dict[str, Any] | None = None,
     ) -> SessionStatus:
         """Determine whether session is WORKING, WAITING_FOR_APPROVAL, or DONE.
 
@@ -324,7 +390,8 @@ class SessionDetector:
 
         # Check SQLite conversation DB for pending approval status (status 9)
         if conversation_id:
-            db_step = self.inspect_conversation_db(conversation_id)
+            if db_step is None:
+                db_step = self.inspect_conversation_db(conversation_id)
             # Antigravity status 9 indicates waiting for user approval / permission
             if db_step.get("status") == 9:
                 return SessionStatus.WAITING_FOR_APPROVAL
@@ -403,6 +470,10 @@ class SessionDetector:
             rows = cur.execute(query, (limit,)).fetchall()
             con.close()
 
+            # Pre-fetch conversation steps to avoid N+1 queries
+            cids_to_fetch = [row[0] for row in rows if row[0]]
+            db_steps_cache = self.inspect_conversations_db_bulk(cids_to_fetch)
+
             for row in rows:
                 cid = row[0] or ""
                 title = row[1] or ""
@@ -428,6 +499,7 @@ class SessionDetector:
                     not_fully_idle,
                     transcript_info,
                     conversation_id=cid,
+                    db_step=db_steps_cache.get(cid),
                 )
 
                 # Filter out sessions that were already DONE prior to startup
