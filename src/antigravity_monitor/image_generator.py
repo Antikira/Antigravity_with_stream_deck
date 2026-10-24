@@ -26,40 +26,12 @@ def generate_key_svg(
     if not title_lines:
         title_lines = [""]
 
-    title_svg_elements = []
     if len(title_lines) == 1:
-        title_svg_elements.append(
-            '<text x="72" y="72" text-anchor="middle" dominant-baseline="middle" '
-            f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="19">'
-            f"{title_lines[0]}</text>"
-        )
+        title_svg_element = _render_single_line_title(title_lines[0])
     elif len(title_lines) == 2:
-        title_svg_elements.append(
-            '<text x="72" y="55" text-anchor="middle" '
-            f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="18">'
-            f"{title_lines[0]}</text>"
-        )
-        title_svg_elements.append(
-            '<text x="72" y="85" text-anchor="middle" '
-            f'fill="#EEEEEE" font-family="Segoe UI, sans-serif" font-size="16">'
-            f"{title_lines[1]}</text>"
-        )
+        title_svg_element = _render_double_line_title(title_lines[0], title_lines[1])
     else:  # 3 or more lines (e.g. Quota key: 5時間枠 / 48% / 955K)
-        title_svg_elements.append(
-            '<text x="72" y="38" text-anchor="middle" '
-            f'fill="#CCCCCC" font-family="Segoe UI, sans-serif" font-size="15">'
-            f"{title_lines[0]}</text>"
-        )
-        title_svg_elements.append(
-            '<text x="72" y="76" text-anchor="middle" '
-            f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="24">'
-            f"{title_lines[1]}</text>"
-        )
-        title_svg_elements.append(
-            '<text x="72" y="112" text-anchor="middle" '
-            f'fill="#E0E0E0" font-family="Segoe UI, sans-serif" font-size="15">'
-            f"{title_lines[2]}</text>"
-        )
+        title_svg_element = _render_multi_line_title(title_lines[0], title_lines[1], title_lines[2])
 
     # Optional status badge indicator at top-right
     badge_svg = ""
@@ -92,12 +64,45 @@ def generate_key_svg(
         '  <rect x="2" y="2" width="140" height="140" rx="18" fill="none" stroke="#FFFFFF" '
         'stroke-width="1.5" opacity="0.25" />\n'
         f"  {badge_svg}\n"
-        f"  {''.join(title_svg_elements)}\n"
+        f"  {title_svg_element}\n"
         f"  {status_bar_svg}\n"
         "</svg>"
     )
 
     return svg
+
+
+def _render_single_line_title(line: str) -> str:
+    return (
+        '<text x="72" y="72" text-anchor="middle" dominant-baseline="middle" '
+        f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="19">'
+        f"{line}</text>"
+    )
+
+
+def _render_double_line_title(line1: str, line2: str) -> str:
+    return (
+        '<text x="72" y="55" text-anchor="middle" '
+        f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="18">'
+        f"{line1}</text>\n"
+        '  <text x="72" y="85" text-anchor="middle" '
+        f'fill="#EEEEEE" font-family="Segoe UI, sans-serif" font-size="16">'
+        f"{line2}</text>"
+    )
+
+
+def _render_multi_line_title(line1: str, line2: str, line3: str) -> str:
+    return (
+        '<text x="72" y="38" text-anchor="middle" '
+        f'fill="#CCCCCC" font-family="Segoe UI, sans-serif" font-size="15">'
+        f"{line1}</text>\n"
+        '  <text x="72" y="76" text-anchor="middle" '
+        f'fill="#FFFFFF" font-family="Segoe UI, sans-serif" font-weight="bold" font-size="24">'
+        f"{line2}</text>\n"
+        '  <text x="72" y="112" text-anchor="middle" '
+        f'fill="#E0E0E0" font-family="Segoe UI, sans-serif" font-size="15">'
+        f"{line3}</text>"
+    )
 
 
 _SVG_HEADER = (
@@ -166,7 +171,7 @@ def _get_done_graphics() -> str:
     return (
         '  <path d="M26 34 Q30 34 30 30 Q30 34 34 34 Q30 34 30 38 Q30 34 26 34 Z" '
         'fill="#FFFFFF" opacity="0.8" />\n'
-        '  <path d="M112 38 Q115 38 115 35 Q115 38 118 38 Q115 38 112 38 Z" '
+        '  <path d="M112 38 Q115 38 115 35 Q115 38 118 38 Q115 38 115 41 Q115 38 112 38 Z" '
         'fill="#FFFFFF" opacity="0.7" />\n'
         '  <path d="M10 98 Q72 88 134 98" fill="none" stroke="#FFFFFF" '
         'stroke-width="2.5" opacity="0.4" stroke-linecap="round" />\n'

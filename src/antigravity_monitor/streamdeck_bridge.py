@@ -303,6 +303,63 @@ class StreamDeckBridge:
                         }
                     )
                 )
+        else:
+            logger.debug("Unhandled Stream Deck event: %s", event)
+
+    def _handle_summary_hub(self, settings: dict[str, Any]) -> None:
+        """Handle summary hub key press."""
+        primary = self.page_manager.get_primary_session(settings=settings)
+        if primary:
+            logger.info(
+                "Hub clicked: Focusing primary session %s (%s)",
+                primary.title,
+                primary.conversation_id,
+            )
+            WindowFocusManager.focus_session(
+                workspace_uris=primary.workspace_uris,
+                title=primary.title,
+            )
+
+    async def _handle_prev_page(self) -> None:
+        """Handle previous page key press."""
+        if self.page_manager.prev_page():
+            await self.update_all_keys(force=True)
+
+    async def _handle_next_page(self) -> None:
+        """Handle next page key press."""
+        if self.page_manager.next_page():
+            await self.update_all_keys(force=True)
+
+    def _handle_session_slot(self, suffix: str) -> None:
+        """Handle session slot key press."""
+        slot_index: int | None = None
+        slot_part = suffix.replace("session_slot_", "")
+        if slot_part.isdigit():
+            num = int(slot_part)
+            # If 1-based (session_slot_1..5), map to 0..4
+            slot_index = num - 1 if num in (1, 2, 3, 4, 5) else num
+
+        if slot_index is not None and 0 <= slot_index < self.page_manager.items_per_page:
+            session = self.page_manager.get_session_by_slot(slot_index)
+            if session:
+                logger.info(
+                    "Activating session slot %d: %s (%s)",
+                    slot_index + 1,
+                    session.title,
+                    session.conversation_id,
+                )
+                WindowFocusManager.focus_session(
+                    workspace_uris=session.workspace_uris,
+                    title=session.title,
+                )
+
+    def _handle_quota(self, suffix: str) -> None:
+        """Handle quota key press."""
+        logger.info(
+            "Quota indicator key pressed: %s -> Requesting background refresh",
+            suffix,
+        )
+        self.collector.request_quota_refresh()
 
     async def handle_key_down(
         self,
@@ -318,65 +375,16 @@ class StreamDeckBridge:
 
         logger.info("Key down: action=%s, suffix=%s, coords=(%s, %s)", action, suffix, col, row)
 
-        # 1. Hub: Focus the primary (highest-priority) session window
         if suffix == "summary_hub":
-            primary = self.page_manager.get_primary_session(settings=settings)
-            if primary:
-                logger.info(
-                    "Hub clicked: Focusing primary session %s (%s)",
-                    primary.title,
-                    primary.conversation_id,
-                )
-                WindowFocusManager.focus_session(
-                    workspace_uris=primary.workspace_uris,
-                    title=primary.title,
-                )
-            return
-
-        # 2. Previous Page Navigation (Instant UI update)
-        if suffix in ("prev_page", "page_prev"):
-            if self.page_manager.prev_page():
-                await self.update_all_keys(force=True)
-            return
-
-        # 3. Next Page Navigation (Instant UI update)
-        if suffix in ("next_page", "page_next"):
-            if self.page_manager.next_page():
-                await self.update_all_keys(force=True)
-            return
-
-        # 4. Session Slot Activation (Session 1..5)
-        slot_index: int | None = None
-        if suffix.startswith("session_slot_"):
-            slot_part = suffix.replace("session_slot_", "")
-            if slot_part.isdigit():
-                num = int(slot_part)
-                # If 1-based (session_slot_1..5), map to 0..4
-                slot_index = num - 1 if num in (1, 2, 3, 4, 5) else num
-
-        if slot_index is not None and 0 <= slot_index < self.page_manager.items_per_page:
-            session = self.page_manager.get_session_by_slot(slot_index)
-            if session:
-                logger.info(
-                    "Activating session slot %d: %s (%s)",
-                    slot_index + 1,
-                    session.title,
-                    session.conversation_id,
-                )
-                WindowFocusManager.focus_session(
-                    workspace_uris=session.workspace_uris,
-                    title=session.title,
-                )
-            return
-
-        # 5. Quota buttons: Trigger non-blocking quota refresh in background worker
-        if "quota" in suffix:
-            logger.info(
-                "Quota indicator key pressed: %s -> Requesting background refresh",
-                suffix,
-            )
-            self.collector.request_quota_refresh()
-            return
+            self._handle_summary_hub(settings)
+        elif suffix in ("prev_page", "page_prev"):
+            await self._handle_prev_page()
+        elif suffix in ("next_page", "page_next"):
+            await self._handle_next_page()
+        elif suffix.startswith("session_slot_"):
+            self._handle_session_slot(suffix)
+        elif "quota" in suffix:
+            self._handle_quota(suffix)
 
 
 # --- Embedded Web Simulator Server ---
@@ -388,8 +396,8 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
     bridge: StreamDeckBridge | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
-        """Silence standard request logging."""
-        pass
+        """Delegate standard request logging to logger.debug."""
+        logger.debug("%s - " + format, self.address_string(), *args)
 
     def do_GET(self) -> None:
         """Handle GET requests."""
@@ -412,6 +420,9 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         # Remove port if present
         host_name = host.split(":")[0] if ":" in host else host
         if host_name not in ("127.0.0.1", "localhost"):
+            logger.warning(
+                "Rejected POST request: Invalid Host '%s' from %s", host, self.address_string()
+            )
             self.send_error(403, "Forbidden: Invalid Host")
             return
 
@@ -419,6 +430,11 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         if origin:
             parsed_origin = urllib.parse.urlparse(origin)
             if parsed_origin.hostname not in ("127.0.0.1", "localhost"):
+                logger.warning(
+                    "Rejected POST request: Invalid Origin '%s' from %s",
+                    origin,
+                    self.address_string(),
+                )
                 self.send_error(403, "Forbidden: Invalid Origin")
                 return
 
@@ -427,19 +443,34 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
             # 2. CSRF / Type validation
             content_type = self.headers.get("Content-Type", "")
             if not content_type.startswith("application/json"):
+                logger.warning(
+                    "Rejected POST request: Unsupported Media Type '%s' from %s",
+                    content_type,
+                    self.address_string(),
+                )
                 self.send_error(415, "Unsupported Media Type")
                 return
 
             # 3. DoS validation: Limit payload size to 4KB
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length > 4096:
+                logger.warning(
+                    "Rejected POST request: Payload too large (%d bytes) from %s",
+                    content_length,
+                    self.address_string(),
+                )
                 self.send_error(413, "Payload Too Large")
                 return
 
             try:
                 body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body) if body else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning(
+                    "Rejected POST request: Malformed JSON from %s (%s)",
+                    self.address_string(),
+                    e,
+                )
                 self.send_error(400, "Bad Request: Invalid JSON")
                 return
 
@@ -509,14 +540,17 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
     def handle_api_press(self, data: dict[str, Any]) -> None:
         """Handle key press simulation."""
         key_id = data.get("key_id", "")
+        logger.info("Simulator key press: key_id=%s from %s", key_id, self.address_string())
         mgr = self.bridge.page_manager if self.bridge else SessionPageManager()
 
         action_result = {"status": "ok", "action": key_id}
 
         if key_id == "page_prev":
             mgr.prev_page()
+            logger.info("Simulator: Navigated to prev page (current: %d)", mgr.current_page)
         elif key_id == "page_next":
             mgr.next_page()
+            logger.info("Simulator: Navigated to next page (current: %d)", mgr.current_page)
         elif key_id == "summary_hub":
             primary = mgr.get_primary_session()
             if primary:
@@ -526,6 +560,11 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
                 )
                 action_result["session"] = primary.title
                 action_result["focused"] = focused
+                logger.info(
+                    "Simulator: Focused primary session '%s' (success=%s)",
+                    primary.title,
+                    focused,
+                )
         elif key_id.startswith("session_slot_"):
             slot_part = key_id.replace("session_slot_", "")
             if slot_part.isdigit():
@@ -538,11 +577,19 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
                     )
                     action_result["session"] = session.title
                     action_result["focused"] = focused
+                    logger.info(
+                        "Simulator: Focused session slot %d ('%s', success=%s)",
+                        slot_idx,
+                        session.title,
+                        focused,
+                    )
             else:
                 action_result["status"] = "error"
                 action_result["info"] = "Invalid session slot ID"
+                logger.warning("Simulator: Invalid session slot ID '%s'", slot_part)
         elif key_id.startswith("quota_"):
             if self.bridge and self.bridge.collector:
+                logger.info("Simulator: Requesting quota refresh for key %s", key_id)
                 self.bridge.collector.request_quota_refresh()
 
         body = json.dumps(action_result, ensure_ascii=False).encode("utf-8")
@@ -604,8 +651,8 @@ def main() -> None:
     if args.info:
         try:
             info_dict = json.loads(args.info)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse Stream Deck -info argument: %s", e)
 
     bridge = StreamDeckBridge(
         port=args.port,

@@ -228,20 +228,12 @@ class SessionPageManager:
     # Key Builders
     # ------------------------------------------------------------------
 
-    def build_summary_hub_key_data(
+    def _get_hub_session_counts(
         self,
-        col: int = 0,
-        row: int = 2,
-        settings: dict[str, Any] | None = None,
-    ) -> KeyRenderData:
-        """Build the 1-button Hub warning light key using per-key instance settings."""
-        hub_cfg = HubConfig.from_settings(settings)
-        all_sessions = [
-            self._cached_sessions[cid]
-            for cid in self._tracked_session_ids
-            if cid in self._cached_sessions
-        ]
-
+        all_sessions: list[SessionInfo],
+        hub_cfg: HubConfig,
+    ) -> tuple[int, int, int]:
+        """Calculate counts for waiting, working, and done sessions."""
         waiting_count = sum(
             1 for s in all_sessions if s.status == SessionStatus.WAITING_FOR_APPROVAL
         )
@@ -265,8 +257,16 @@ class SessionPageManager:
         else:
             done_count = sum(1 for s in all_sessions if s.status == SessionStatus.DONE)
 
-        primary = self.get_primary_session(settings=settings)
+        return waiting_count, working_count, done_count
 
+    def _get_hub_ui_state(
+        self,
+        waiting_count: int,
+        working_count: int,
+        done_count: int,
+        primary: SessionInfo | None,
+    ) -> tuple[str, str, str, str]:
+        """Determine UI state (status, bg_color, title, subtitle) based on counts."""
         if waiting_count > 0:
             status = "waiting"
             bg_color = self.STATUS_COLORS[SessionStatus.WAITING_FOR_APPROVAL]
@@ -290,6 +290,30 @@ class SessionPageManager:
             bg_color = "#263238"
             title = "Antigravity\n(待機中)"
             subtitle = "READY"
+
+        return status, bg_color, title, subtitle
+
+    def build_summary_hub_key_data(
+        self,
+        col: int = 0,
+        row: int = 2,
+        settings: dict[str, Any] | None = None,
+    ) -> KeyRenderData:
+        """Build the 1-button Hub warning light key using per-key instance settings."""
+        hub_cfg = HubConfig.from_settings(settings)
+        all_sessions = [
+            self._cached_sessions[cid]
+            for cid in self._tracked_session_ids
+            if cid in self._cached_sessions
+        ]
+
+        waiting_count, working_count, done_count = self._get_hub_session_counts(
+            all_sessions, hub_cfg
+        )
+        primary = self.get_primary_session(settings=settings)
+        status, bg_color, title, subtitle = self._get_hub_ui_state(
+            waiting_count, working_count, done_count, primary
+        )
 
         payload: dict[str, Any] = {"action": "activate_primary"}
         if primary:

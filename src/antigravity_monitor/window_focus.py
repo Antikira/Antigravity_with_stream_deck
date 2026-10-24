@@ -179,7 +179,15 @@ class WindowFocusManager:
             for uri in workspace_uris:
                 hwnd = cls.find_window_for_workspace(uri)
                 if hwnd:
-                    return cls.bring_to_foreground(hwnd)
+                    success = cls.bring_to_foreground(hwnd)
+                    logger.info(
+                        "Focused session '%s' by workspace URI '%s' (hwnd=%s, success=%s)",
+                        title,
+                        uri,
+                        hwnd,
+                        success,
+                    )
+                    return success
 
         # Try finding by keywords
         keywords: list[str] = []
@@ -191,6 +199,18 @@ class WindowFocusManager:
 
         hwnd = cls.find_window_for_keyword_list(keywords)
         if hwnd:
-            return cls.bring_to_foreground(hwnd)
+            success = cls.bring_to_foreground(hwnd)
+            logger.info(
+                "Focused session '%s' by keyword match (hwnd=%s, success=%s)",
+                title,
+                hwnd,
+                success,
+            )
+            return success
 
+        logger.info(
+            "No matching window found to focus for session '%s' (workspace_uris=%s)",
+            title,
+            workspace_uris,
+        )
         return False

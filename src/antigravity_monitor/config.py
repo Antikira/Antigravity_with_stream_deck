@@ -125,14 +125,9 @@ class ConversationListConfig:
         """Convert config to serializable dictionary."""
         return asdict(self)
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> ConversationListConfig:
-        """Create config from dictionary with safety validation and fallback."""
-        if not data or not isinstance(data, dict):
-            return cls()
-
-        # Validate sort_criteria
-        raw_criteria = data.get("sort_criteria")
+    @staticmethod
+    def _parse_sort_criteria(raw_criteria: Any) -> list[dict[str, Any]]:
+        """Parse and validate sort criteria from raw input."""
         sort_criteria = []
         if isinstance(raw_criteria, list):
             valid_fields = {"status", "updated_at", "title"}
@@ -150,45 +145,41 @@ class ConversationListConfig:
                 {"field": "updated_at", "ascending": False},
                 {"field": "title", "ascending": True},
             ]
+        return sort_criteria
 
-        # Clamp done_retention_minutes (-1 to 525600)
+    @staticmethod
+    def _parse_clamped_int(value: Any, default: int, min_val: int, max_val: int) -> int:
+        """Parse integer and clamp it between min_val and max_val."""
         try:
-            done_retention = int(data.get("done_retention_minutes", 60))
-            if done_retention < -1:
-                done_retention = -1
-            elif done_retention > 525600:
-                done_retention = 525600
+            parsed = int(value)
+            if parsed < min_val:
+                return min_val
+            elif parsed > max_val:
+                return max_val
+            return parsed
         except (ValueError, TypeError):
-            done_retention = 60
+            return default
 
-        # Clamp max_inactivity_days (0 to 365)
-        try:
-            max_inactivity = int(data.get("max_inactivity_days", 7))
-            if max_inactivity < 0:
-                max_inactivity = 0
-            elif max_inactivity > 365:
-                max_inactivity = 365
-        except (ValueError, TypeError):
-            max_inactivity = 7
-
-        # Clamp max_tracked_sessions (5 to 100)
-        try:
-            max_tracked = int(data.get("max_tracked_sessions", 20))
-            if max_tracked < 5:
-                max_tracked = 5
-            elif max_tracked > 100:
-                max_tracked = 100
-        except (ValueError, TypeError):
-            max_tracked = 20
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ConversationListConfig:
+        """Create config from dictionary with safety validation and fallback."""
+        if not data or not isinstance(data, dict):
+            return cls()
 
         return cls(
-            sort_criteria=sort_criteria,
-            done_retention_minutes=done_retention,
-            max_inactivity_days=max_inactivity,
+            sort_criteria=cls._parse_sort_criteria(data.get("sort_criteria")),
+            done_retention_minutes=cls._parse_clamped_int(
+                data.get("done_retention_minutes", 60), 60, -1, 525600
+            ),
+            max_inactivity_days=cls._parse_clamped_int(
+                data.get("max_inactivity_days", 7), 7, 0, 365
+            ),
             protect_waiting_sessions=bool(data.get("protect_waiting_sessions", True)),
             protect_working_sessions=bool(data.get("protect_working_sessions", True)),
             exclude_inactive_unlocked=bool(data.get("exclude_inactive_unlocked", False)),
-            max_tracked_sessions=max_tracked,
+            max_tracked_sessions=cls._parse_clamped_int(
+                data.get("max_tracked_sessions", 20), 20, 5, 100
+            ),
         )
 
     @classmethod
