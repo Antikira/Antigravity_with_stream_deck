@@ -44,6 +44,7 @@ def _make_session(
 # 0. HubConfig Tests
 # ----------------------------------------------------------------------
 
+
 def test_hubconfig_from_settings():
     # Test None and empty dict
     assert HubConfig.from_settings(None).hub_done_timeout_seconds == 300.0
@@ -54,8 +55,8 @@ def test_hubconfig_from_settings():
         "hub_done_timeout_seconds": 120.5,
         "hub_sort_criteria": [
             {"field": "status", "ascending": True},
-            {"field": "updated_at", "ascending": False}
-        ]
+            {"field": "updated_at", "ascending": False},
+        ],
     }
     cfg_valid = HubConfig.from_settings(valid_settings)
     assert cfg_valid.hub_done_timeout_seconds == 120.5
@@ -81,7 +82,10 @@ def test_hubconfig_from_settings():
         "hub_sort_criteria": [
             "not a dict",
             {"field": "invalid_field", "ascending": True},
-            {"field": "title", "ascending": "not a bool"} # "not a bool" evaluates to True in bool()
+            {
+                "field": "title",
+                "ascending": "not a bool",
+            },  # "not a bool" evaluates to True in bool()
         ]
     }
     cfg_invalid_sort = HubConfig.from_settings(invalid_criteria_settings)
@@ -121,6 +125,7 @@ def test_parse_session_datetime():
 
     # Iso format without timezone handled by fallback
     from unittest.mock import patch
+
     with patch("src.antigravity_monitor.config._parse_db_datetime", return_value=None):
         iso_str = "2026-10-04T12:00:00"
         parsed_iso = parse_session_datetime(iso_str)
@@ -175,9 +180,9 @@ def test_config_from_dict_and_clamping():
 
     # Out of range upper bound for max_tracked_sessions
     raw2 = {
-        "done_retention_minutes": -5, # Clamped to -1
-        "max_inactivity_days": 400, # Clamped to 365
-        "max_tracked_sessions": 150 # Clamped to 100
+        "done_retention_minutes": -5,  # Clamped to -1
+        "max_inactivity_days": 400,  # Clamped to 365
+        "max_tracked_sessions": 150,  # Clamped to 100
     }
     cfg2 = ConversationListConfig.from_dict(raw2)
     assert cfg2.done_retention_minutes == -1
@@ -194,7 +199,7 @@ def test_config_from_dict_and_clamping():
         "done_retention_minutes": "invalid",
         "max_inactivity_days": "invalid",
         "max_tracked_sessions": "invalid",
-        "sort_criteria": "not a list"
+        "sort_criteria": "not a list",
     }
     cfg_invalid = ConversationListConfig.from_dict(raw_invalid)
     assert cfg_invalid.done_retention_minutes == 60
@@ -219,6 +224,7 @@ def test_config_file_persistence_exceptions(tmp_path: Path):
     invalid_path = tmp_path / "somedir"
     invalid_path.mkdir()
     cfg.save_to_file(invalid_path)  # Should catch Exception and log error, not raise
+
 
 def test_config_file_persistence(tmp_path: Path):
     cfg_file = tmp_path / "conversation_settings.json"
