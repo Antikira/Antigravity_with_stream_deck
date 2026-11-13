@@ -1234,3 +1234,91 @@ def test_configure_windowless_logging(tmp_path: Path, monkeypatch: pytest.Monkey
                 handler.close()
         if created_stream is not None:
             created_stream.close()
+
+
+def test_ensure_uv_available_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.antigravity_monitor.installer import ensure_uv_available
+
+    monkeypatch.setattr("src.antigravity_monitor.installer.shutil.which", lambda _: None)
+    with pytest.raises(RuntimeError, match="uv command not found"):
+        ensure_uv_available()
+
+
+def test_setup_isolated_venv_repairs_broken_venv_and_syncs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.antigravity_monitor.installer import setup_isolated_venv
+
+    project_root = tmp_path / "repo"
+    scripts_dir = project_root / ".venv" / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    # Create dummy broken executables in .venv
+    py_exe = scripts_dir / "python.exe"
+    pyw_exe = scripts_dir / "pythonw.exe"
+    py_exe.write_bytes(b"")
+    pyw_exe.write_bytes(b"")
+
+    commands: list[list[str]] = []
+
+    class FakeResult:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    def fake_run(cmd: list[str], **kwargs):
+        commands.append(cmd)
+        # Simulate broken .venv interpreter check returning exit code 1
+        if len(cmd) >= 3 and cmd[1:3] == ["-c", "import sys"]:
+            return FakeResult(1)
+        return FakeResult(0)
+
+    monkeypatch.setattr(
+        "src.antigravity_monitor.installer.shutil.which",
+        lambda name: "C:/bin/uv.exe" if name == "uv" else None,
+    )
+    monkeypatch.setattr("src.antigravity_monitor.installer.subprocess.run", fake_run)
+
+    resolved = setup_isolated_venv(project_root)
+    assert resolved == pyw_exe
+    assert ["C:/bin/uv.exe", "venv", "--clear"] in commands
+    assert ["C:/bin/uv.exe", "sync", "--no-dev"] in commands
+
+
+def test_build_windowless_launcher_and_install_plugin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.antigravity_monitor.installer import (
+        find_csc_compiler,
+        install_plugin,
+        uninstall_plugin,
+    )
+
+    if find_csc_compiler() is None:
+        pytest.skip("csc.exe not available in this environment")
+
+    source_dir = tmp_path / "source" / "com.user.antigravity.sdPlugin"
+    source_dir.mkdir(parents=True)
+    (source_dir / "manifest.json").write_text('{"CodePathWin": "antigravity_launcher.exe"}')
+
+    appdata_dir = tmp_path / "appdata"
+    monkeypatch.setenv("APPDATA", str(appdata_dir))
+
+    dest_dir = install_plugin(
+        source_dir=source_dir,
+        symlink=False,
+        setup_venv=False,
+        build_launcher=True,
+    )
+
+    assert dest_dir == appdata_dir / "Elgato" / "StreamDeck" / "Plugins" / source_dir.name
+    assert (dest_dir / "project_path.txt").is_file()
+    launcher_path = dest_dir / "antigravity_launcher.exe"
+    assert launcher_path.is_file()
+
+    # Verify PE subsystem is IMAGE_SUBSYSTEM_WINDOWS_GUI (2) so no console window opens
+    pe_bytes = launcher_path.read_bytes()
+    pe_offset = int.from_bytes(pe_bytes[0x3C:0x40], "little")
+    subsystem = int.from_bytes(pe_bytes[pe_offset + 24 + 68 : pe_offset + 24 + 70], "little")
+    assert subsystem == 2
+
+    assert uninstall_plugin(source_dir.name) is True
+    assert not dest_dir.exists()
