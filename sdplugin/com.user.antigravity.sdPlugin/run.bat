@@ -32,23 +32,6 @@ if not defined PROJECT_DIR (
     )
 )
 
-REM 4. Fallback to GUI folder picker dialog
-if not defined PROJECT_DIR (
-    echo [%DATE% %TIME%] Project directory not found. Requesting via folder picker... >> "%LOG_FILE%"
-    for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Please select the Antigravity Stream Deck project root directory (contains src/antigravity_monitor)'; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"`) do (
-        set "SELECTED_PATH=%%I"
-    )
-    if defined SELECTED_PATH (
-        if exist "!SELECTED_PATH!\src\antigravity_monitor" (
-            set "PROJECT_DIR=!SELECTED_PATH!"
-            echo !PROJECT_DIR!> "%CONFIG_FILE%"
-            echo [%DATE% %TIME%] Saved selected project directory: !PROJECT_DIR! >> "%LOG_FILE%"
-        ) else (
-            echo [%DATE% %TIME%] Selected folder does not contain src\antigravity_monitor: !SELECTED_PATH! >> "%LOG_FILE%"
-        )
-    )
-)
-
 if not defined PROJECT_DIR (
     echo [%DATE% %TIME%] [ERROR] Could not resolve Antigravity project directory. >> "%LOG_FILE%"
     exit /b 1
@@ -56,10 +39,13 @@ if not defined PROJECT_DIR (
 
 cd /d "%PROJECT_DIR%"
 set "PYTHONPATH=%PROJECT_DIR%"
+set "ANTIGRAVITY_LOG_FILE=%LOG_FILE%"
 
-REM Determine Python executable
+REM Determine Python executable (prefer windowless pythonw.exe)
 if defined ANTIGRAVITY_PYTHON (
     set "PY_CMD=%ANTIGRAVITY_PYTHON%"
+) else if exist "%PROJECT_DIR%\.venv\Scripts\pythonw.exe" (
+    set "PY_CMD=%PROJECT_DIR%\.venv\Scripts\pythonw.exe"
 ) else if exist "%PROJECT_DIR%\.venv\Scripts\python.exe" (
     set "PY_CMD=%PROJECT_DIR%\.venv\Scripts\python.exe"
 ) else (

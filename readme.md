@@ -32,6 +32,7 @@ streamdeck_compornent/
 ├── data/                                    # バックアップやテンポラリデータ格納ディレクトリ
 ├── templates/                               # 共通マステンプレート定義
 ├── pyproject.toml
+├── install_plugin.bat                       # ワンステップ・クリーンインストーラ (uv隔離環境)
 └── readme.md                                # 本ドキュメント
 ```
 
@@ -62,10 +63,29 @@ streamdeck_compornent/
 
 ### 導入と利用手順
 
-#### 1. Stream Deck へのプラグインインストール
+#### 1. Stream Deck へのプラグインインストール（環境非汚染・ウィンドウレス起動）
+
+`uv` を利用してプロジェクト直下の隔離仮想環境（`.venv`）を自動構築するため、システムやグローバルの Python 環境を汚染せずに導入できます（事前に `uv` のインストールが必要です）。
+
+```bat
+install_plugin.bat
+```
+
+または、すでに `.venv` が構築済みの環境からは以下でも実行できます：
 ```bash
 uv run python -m src.antigravity_monitor.installer
 ```
+
+インストール時に以下が自動実行されます：
+- プロジェクト直下への隔離仮想環境（`.venv`）の構築・依存パッケージ同期（`uv sync --no-dev`）
+- コンソール画面を開かずに `.venv\Scripts\pythonw.exe` を直接起動するウィンドウレスランチャー（`antigravity_launcher.exe`）の生成・配置
+- `%APPDATA%\Elgato\StreamDeck\Plugins\com.user.antigravity.sdPlugin` へのプラグイン配置
+
+アンインストールする場合：
+```bat
+install_plugin.bat --uninstall
+```
+
 ※ インストール後、Elgato Stream Deck ソフトウェアを起動または再起動してください。
 右側のアクション一覧に「**Antigravity Monitor**」が表示され、以下のアクションが利用可能です：
 - `Antigravity Hub (1-Button)`: 1ボタン集約ハブ

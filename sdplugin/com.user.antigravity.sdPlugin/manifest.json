@@ -15,7 +15,7 @@
       "MinimumVersion": "10"
     }
   ],
-  "CodePathWin": "run.bat",
+  "CodePathWin": "antigravity_launcher.exe",
   "Actions": [
     {
       "Name": "Antigravity Hub (Warning Light)",
