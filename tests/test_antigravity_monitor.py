@@ -1192,3 +1192,45 @@ def test_simulator_http_handler_log_message(monkeypatch: pytest.MonkeyPatch) -> 
     assert args[0] == '%s - "%s" %s %s'
     assert args[1] == "127.0.0.1"
     assert args[2:] == ("GET /api/status HTTP/1.1", "200", "-")
+
+
+def test_configure_windowless_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import logging
+    import sys
+
+    from src.antigravity_monitor.streamdeck_bridge import configure_windowless_logging
+
+    log_path = tmp_path / "logs" / "plugin.log"
+    monkeypatch.setattr("sys.stdout", None)
+    monkeypatch.setattr("sys.stderr", None)
+
+    root_logger = logging.getLogger()
+    existing_handlers = set(root_logger.handlers)
+    created_stream = None
+
+    try:
+        configured = configure_windowless_logging(log_path)
+        assert configured == log_path
+        assert sys.stdout is not None
+        assert sys.stderr is not None
+        created_stream = sys.stdout
+
+        print("hello windowless")
+        test_logger = logging.getLogger("test_windowless")
+        test_logger.setLevel(logging.INFO)
+        test_logger.info("logger entry")
+
+        for handler in list(root_logger.handlers):
+            if handler not in existing_handlers:
+                handler.flush()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "hello windowless" in content
+        assert "logger entry" in content
+    finally:
+        for handler in list(root_logger.handlers):
+            if handler not in existing_handlers:
+                root_logger.removeHandler(handler)
+                handler.close()
+        if created_stream is not None:
+            created_stream.close()

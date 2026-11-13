@@ -13,6 +13,8 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+import sys
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +45,43 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("streamdeck_bridge")
+
+
+def configure_windowless_logging(log_file: Path | str | None = None) -> Path | None:
+    """Redirect stdout/stderr and root logger to a file when running under pythonw."""
+    env_log = log_file or os.environ.get("ANTIGRAVITY_LOG_FILE")
+    is_windowless = (sys.stdout is None) or (sys.stderr is None)
+    if not is_windowless and not env_log:
+        return None
+
+    target_log = (
+        Path(env_log)
+        if env_log
+        else Path(__file__).resolve().parent.parent.parent / "logs" / "plugin.log"
+    )
+    target_log.parent.mkdir(parents=True, exist_ok=True)
+
+    if is_windowless:
+        stream = target_log.open("a", encoding="utf-8", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = stream
+        if sys.stderr is None:
+            sys.stderr = stream
+
+    root_logger = logging.getLogger()
+    resolved_target = target_log.resolve()
+    has_handler = any(
+        isinstance(h, logging.FileHandler) and Path(h.baseFilename).resolve() == resolved_target
+        for h in root_logger.handlers
+    )
+    if not has_handler:
+        handler = logging.FileHandler(target_log, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        root_logger.addHandler(handler)
+        if root_logger.level == logging.NOTSET:
+            root_logger.setLevel(logging.INFO)
+
+    return target_log
 
 
 class StreamDeckBridge:
@@ -683,6 +722,7 @@ async def async_main() -> None:
 
 def main() -> None:
     """Entry point for the Stream Deck plugin process."""
+    configure_windowless_logging()
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:
