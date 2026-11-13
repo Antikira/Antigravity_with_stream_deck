@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sqlite3
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,6 +67,88 @@ class SessionStatus(str, enum.Enum):
     DONE = "DONE"  # Done / Idle (turn completed, waiting for new request)
 
 
+def _clean_title_candidate(text: str) -> str:
+    """Clean candidate text by stripping XML-like tags and metadata blocks."""
+    if not isinstance(text, str) or not text:
+        return ""
+    # Remove <ADDITIONAL_METADATA>...</ADDITIONAL_METADATA> blocks
+    cleaned = re.sub(r"<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>", "", text, flags=re.DOTALL)
+    # Remove XML-like system tags like <USER_REQUEST>, </USER_REQUEST>
+    cleaned = re.sub(r"</?[A-Z_]+>", "", cleaned)
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return ""
+
+
+def _extract_workspace_name(workspace_uris: list[str]) -> str:
+    """Extract folder name from workspace URIs."""
+    if not workspace_uris or not isinstance(workspace_uris, list):
+        return ""
+    for uri in workspace_uris:
+        if not isinstance(uri, str) or not uri.strip():
+            continue
+        decoded = urllib.parse.unquote(uri.strip())
+        if decoded.lower().startswith("file://"):
+            decoded = decoded[7:]
+        cleaned_path = decoded.rstrip("/\\")
+        if not cleaned_path:
+            continue
+        parts = [p for p in re.split(r"[/\\]", cleaned_path) if p]
+        if parts:
+            candidate = parts[-1].rstrip(":")
+            if candidate:
+                return candidate
+    return ""
+
+
+def _resolve_session_title(
+    title: str,
+    preview: str = "",
+    workspace_uris: list[str] | None = None,
+    first_user_prompt: str = "",
+    conversation_id: str = "",
+) -> str:
+    """Resolve session title using multi-tier fallback."""
+    # 1. Title
+    cleaned = _clean_title_candidate(title)
+    if cleaned:
+        return cleaned
+
+    # 2. Preview
+    cleaned = _clean_title_candidate(preview)
+    if cleaned:
+        return cleaned
+
+    # 3. Workspace folder name
+    ws_name = _extract_workspace_name(workspace_uris or [])
+    if ws_name:
+        return ws_name
+
+    # 4. First user prompt
+    cleaned = _clean_title_candidate(first_user_prompt)
+    if cleaned:
+        return cleaned
+
+    # 5. CLI-<cid[:6]> or "Session"
+    cid = conversation_id.strip()
+    if cid:
+        return f"CLI-{cid[:6]}"
+    return "Session"
+
+
+def _has_pending_permission_blob(perm_blob: bytes | None) -> bool:
+    """Return True if perm_blob contains a pending (unapproved) permission request."""
+    if perm_blob is None or not isinstance(perm_blob, (bytes, bytearray)) or len(perm_blob) == 0:
+        return False
+    # Decision byte pattern in Protobuf payload:
+    # \x10\x01\x18[\x01-\x05]\* indicates an already resolved permission decision
+    if re.search(rb"\x10\x01\x18[\x01-\x05]\*", bytes(perm_blob)):
+        return False
+    return True
+
+
 @dataclass
 class SessionInfo:
     """Information representing an Antigravity session."""
@@ -88,10 +171,15 @@ class SessionInfo:
     @property
     def short_title(self) -> str:
         """Return truncated title suitable for Stream Deck key display (max 14 chars)."""
-        clean = (self.title or "Session").strip()
-        if len(clean) > 12:
-            return clean[:11] + "…"
-        return clean
+        resolved = _resolve_session_title(
+            self.title,
+            self.preview,
+            self.workspace_uris,
+            conversation_id=self.conversation_id,
+        )
+        if len(resolved) > 12:
+            return resolved[:11] + "…"
+        return resolved
 
     @property
     def display_status_label(self) -> str:
@@ -166,10 +254,7 @@ def _is_permission_or_waiting_tool(name: str) -> bool:
 
     # Explicit tools in Antigravity that prompt for user permission or interaction
     known_interactive_tools = {
-        "run_command",
         "ask_question",
-        "write_to_file",
-        "replace_file_content",
     }
     if clean in known_interactive_tools:
         return True
@@ -244,10 +329,12 @@ class SessionDetector:
             ).fetchone()
             con.close()
             if row:
+                perm_blob = row[2]
                 return {
                     "step_type": row[0],
                     "status": row[1],
-                    "has_permissions": row[2] is not None,
+                    "has_permissions": perm_blob is not None,
+                    "has_pending_permissions": _has_pending_permission_blob(perm_blob),
                 }
         except Exception:
             pass
@@ -303,6 +390,36 @@ class SessionDetector:
                 self._transcript_cache[conversation_id] = (mtime, {})
             return {}
 
+    def extract_first_user_prompt(self, conversation_id: str) -> str:
+        """Extract first user prompt from transcript.jsonl if available."""
+        if not conversation_id:
+            return ""
+        transcript_path = (
+            self.brain_dir / conversation_id / ".system_generated" / "logs" / "transcript.jsonl"
+        )
+        if not transcript_path.is_file():
+            return ""
+        try:
+            with transcript_path.open("rb") as f:
+                chunk = f.read(16384).decode("utf-8", errors="replace")
+            for line in chunk.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    if isinstance(data, dict) and data.get("type") == "USER_INPUT":
+                        content = data.get("content")
+                        if isinstance(content, str):
+                            cleaned = _clean_title_candidate(content)
+                            if cleaned:
+                                return cleaned
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return ""
+
     def determine_status(
         self,
         db_status: str,
@@ -335,7 +452,7 @@ class SessionDetector:
             # Antigravity status 9 indicates waiting for user approval / permission
             if db_step.get("status") == 9:
                 return SessionStatus.WAITING_FOR_APPROVAL
-            if is_running and db_step.get("status") == 2 and db_step.get("has_permissions"):
+            if is_running and db_step.get("status") == 2 and db_step.get("has_pending_permissions"):
                 return SessionStatus.WAITING_FOR_APPROVAL
 
         tool_calls = last_transcript_step.get("tool_calls", [])
@@ -447,6 +564,20 @@ class SessionDetector:
 
                 if self.ignore_preexisting_done and (cid not in self._actively_tracked_ids):
                     continue
+
+                if not title.strip():
+                    first_user_prompt = ""
+                    if not _clean_title_candidate(preview) and not _extract_workspace_name(
+                        workspace_uris
+                    ):
+                        first_user_prompt = self.extract_first_user_prompt(cid)
+                    title = _resolve_session_title(
+                        title,
+                        preview=preview,
+                        workspace_uris=workspace_uris,
+                        first_user_prompt=first_user_prompt,
+                        conversation_id=cid,
+                    )
 
                 session = SessionInfo(
                     conversation_id=cid,

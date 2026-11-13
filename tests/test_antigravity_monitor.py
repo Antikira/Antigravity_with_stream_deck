@@ -517,10 +517,7 @@ def test_parse_db_datetime():
 @pytest.mark.parametrize(
     "tool_name",
     [
-        "run_command",
         "ask_question",
-        "write_to_file",
-        "replace_file_content",
         "ask_permission",
         "request_permission",
         "confirm_browser_setup",
@@ -548,6 +545,36 @@ def test_permission_tools_trigger_waiting_for_approval(tool_name: str):
     )
 
     assert status == SessionStatus.WAITING_FOR_APPROVAL
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "run_command",
+        "write_to_file",
+        "replace_file_content",
+    ],
+)
+def test_execution_tools_remain_working_without_pending_permission(tool_name: str):
+    detector = SessionDetector(base_dir=Path("."))
+
+    # Execution tools remain working unless explicit permission is requested
+    status = detector.determine_status(
+        "CASCADE_RUN_STATUS_RUNNING",
+        not_fully_idle=True,
+        last_transcript_step={
+            "type": "PLANNER_RESPONSE",
+            "status": "DONE",
+            "tool_calls": [
+                {
+                    "name": tool_name,
+                    "function": {"name": tool_name, "arguments": "{}"},
+                }
+            ],
+        },
+    )
+
+    assert status == SessionStatus.WORKING
 
 
 @pytest.mark.parametrize(
@@ -648,6 +675,27 @@ def test_permission_turns_hub_and_slots_red(tmp_path: Path):
     presence_dir.mkdir(parents=True, exist_ok=True)
     (presence_dir / "sess-perm-01.lock").touch()
 
+    # Conversation DB with pending permission
+    conv_dir = base_dir / "conversations"
+    conv_dir.mkdir(parents=True, exist_ok=True)
+    cid_db = conv_dir / "sess-perm-01.db"
+    con_cid = sqlite3.connect(cid_db)
+    cur_cid = con_cid.cursor()
+    cur_cid.execute("""
+        CREATE TABLE steps (
+            idx INTEGER PRIMARY KEY,
+            step_type INTEGER,
+            status INTEGER,
+            permissions BLOB
+        )
+    """)
+    cur_cid.execute(
+        "INSERT INTO steps VALUES (1, 132, 2, ?)",
+        (b"\x12\x10\n\x0e\n\x07command\x12\x03cmd\x10\x01*\x07command",),
+    )
+    con_cid.commit()
+    con_cid.close()
+
     # Transcript with run_command tool call
     log_dir = base_dir / "brain" / "sess-perm-01" / ".system_generated" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -661,6 +709,7 @@ def test_permission_turns_hub_and_slots_red(tmp_path: Path):
                     "tool_calls": [
                         {
                             "name": "run_command",
+                            "permission": True,
                             "function": {
                                 "name": "run_command",
                                 "arguments": '{"CommandLine": "pytest"}',
@@ -698,7 +747,35 @@ def test_permission_turns_hub_and_slots_red(tmp_path: Path):
     assert "[承認待]" in slot_key.title
 
 
-def test_sqlite_permissions_detection(tmp_path: Path):
+@pytest.mark.parametrize(
+    ("status_code", "perm_blob", "expected_status"),
+    [
+        # (a) status=2 and unapproved pending permission blob -> WAITING_FOR_APPROVAL
+        (2, b"\x12\x10\x08command_permission_blob", SessionStatus.WAITING_FOR_APPROVAL),
+        # (b) status=2 and approved permission blob (\x10\x01\x18\x01* single approval) -> WORKING
+        (
+            2,
+            b"\x12\x1e\n\x12\n\x07command\x12\x07uv run \x10\x01\x18\x01*\x07command",
+            SessionStatus.WORKING,
+        ),
+        # (b) status=2 and approved permission blob (\x10\x01\x18\x05* rule approval) -> WORKING
+        (
+            2,
+            b"\x12\x1e\n\x12\n\x07command\x12\x07uv run \x10\x01\x18\x05*\x07command",
+            SessionStatus.WORKING,
+        ),
+        # (c) status=2 and permissions=None -> WORKING
+        (2, None, SessionStatus.WORKING),
+        # (d) status=9 -> WAITING_FOR_APPROVAL
+        (9, None, SessionStatus.WAITING_FOR_APPROVAL),
+    ],
+)
+def test_sqlite_permissions_detection(
+    tmp_path: Path,
+    status_code: int,
+    perm_blob: bytes | None,
+    expected_status: SessionStatus,
+):
     base_dir = tmp_path / "antigravity"
     conv_dir = base_dir / "conversations"
     conv_dir.mkdir(parents=True, exist_ok=True)
@@ -715,10 +792,9 @@ def test_sqlite_permissions_detection(tmp_path: Path):
             permissions BLOB
         )
         """)
-    # Step 1: In progress (status 2) with permissions blob
     cur.execute(
         "INSERT INTO steps VALUES (?, ?, ?, ?)",
-        (1, 132, 2, b"\x12\x10\x08command_permission_blob"),
+        (1, 132, status_code, perm_blob),
     )
     con.commit()
     con.close()
@@ -734,7 +810,139 @@ def test_sqlite_permissions_detection(tmp_path: Path):
         },
         conversation_id=cid,
     )
-    assert status == SessionStatus.WAITING_FOR_APPROVAL
+    assert status == expected_status
+
+
+def test_cli_session_title_fallback(tmp_path: Path):
+    base_dir = tmp_path / "antigravity"
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = base_dir / "conversation_summaries.db"
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute("""
+        CREATE TABLE conversation_summaries (
+            conversation_id TEXT PRIMARY KEY,
+            title TEXT,
+            preview TEXT,
+            step_count INTEGER,
+            last_modified_time TEXT,
+            workspace_uris TEXT,
+            status TEXT,
+            parent_conversation_id TEXT,
+            not_fully_idle INTEGER
+        )
+        """)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Session 1: title="", preview contains <USER_REQUEST> tags
+    cur.execute(
+        "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "cid-001-preview",
+            "",
+            "<USER_REQUEST>\nFix bug in parser\n</USER_REQUEST>",
+            5,
+            now_iso,
+            json.dumps(["file:///D:/projects/my_cli_app"]),
+            "CASCADE_RUN_STATUS_IDLE",
+            "",
+            0,
+        ),
+    )
+
+    # Session 2: title="", preview="", workspace_uris set
+    cur.execute(
+        "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "cid-002-workspace",
+            "",
+            "",
+            5,
+            now_iso,
+            json.dumps(["file:///D:/projects/my_cli_app"]),
+            "CASCADE_RUN_STATUS_IDLE",
+            "",
+            0,
+        ),
+    )
+
+    # Session 3: title="", preview="", workspace_uris=[], has transcript.jsonl with USER_INPUT
+    cur.execute(
+        "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "cid-003-transcript",
+            "",
+            "",
+            5,
+            now_iso,
+            "[]",
+            "CASCADE_RUN_STATUS_IDLE",
+            "",
+            0,
+        ),
+    )
+
+    # Session 4: all empty
+    cur.execute(
+        "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "cid-004-all-empty",
+            "",
+            "",
+            5,
+            now_iso,
+            "[]",
+            "CASCADE_RUN_STATUS_IDLE",
+            "",
+            0,
+        ),
+    )
+    con.commit()
+    con.close()
+
+    # Create transcript for Session 3
+    t_log_dir = base_dir / "brain" / "cid-003-transcript" / ".system_generated" / "logs"
+    t_log_dir.mkdir(parents=True, exist_ok=True)
+    with open(t_log_dir / "transcript.jsonl", "w", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    "step_index": 1,
+                    "type": "USER_INPUT",
+                    "content": (
+                        "<ADDITIONAL_METADATA>\ninfo\n</ADDITIONAL_METADATA>\n"
+                        "<USER_REQUEST>\nRefactor database schema\n</USER_REQUEST>"
+                    ),
+                }
+            )
+            + "\n"
+        )
+
+    detector = SessionDetector(base_dir=base_dir, ignore_preexisting_done=False)
+    sessions = detector.list_sessions()
+    sessions_by_id = {s.conversation_id: s for s in sessions}
+
+    # Case 1: Resolved from preview
+    s1 = sessions_by_id["cid-001-preview"]
+    assert s1.title == "Fix bug in parser"
+    assert s1.short_title == "Fix bug in …"
+
+    # Case 2: Resolved from workspace URI
+    s2 = sessions_by_id["cid-002-workspace"]
+    assert s2.title == "my_cli_app"
+    assert s2.short_title == "my_cli_app"
+
+    # Case 3: Resolved from transcript first user prompt
+    s3 = sessions_by_id["cid-003-transcript"]
+    assert s3.title == "Refactor database schema"
+    assert s3.short_title == "Refactor da…"
+
+    # Case 4: Fallback to CLI-{cid[:6]}
+    s4 = sessions_by_id["cid-004-all-empty"]
+    assert s4.title == "CLI-cid-00"
+    assert s4.short_title == "CLI-cid-00"
 
 
 def test_state_store_atomic_update_and_listener():
@@ -982,4 +1190,3 @@ def test_simulator_http_handler_log_message(monkeypatch: pytest.MonkeyPatch) -> 
     assert args[0] == '%s - "%s" %s %s'
     assert args[1] == "127.0.0.1"
     assert args[2:] == ("GET /api/status HTTP/1.1", "200", "-")
-
