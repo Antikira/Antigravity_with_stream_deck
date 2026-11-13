@@ -277,6 +277,7 @@ def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
             reader.get_quota_stats()
             assert mock_run.called
             _, kwargs = mock_run.call_args
+            assert kwargs.get("stdin") == subprocess.DEVNULL
             assert kwargs.get("creationflags") == getattr(
                 subprocess, "CREATE_NO_WINDOW", 0x08000000
             )
@@ -294,6 +295,7 @@ def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
             reader.get_quota_stats()
             assert mock_run.called
             _, kwargs = mock_run.call_args
+            assert kwargs.get("stdin") == subprocess.DEVNULL
             assert "creationflags" not in kwargs
 
 
