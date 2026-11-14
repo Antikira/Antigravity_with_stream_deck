@@ -1196,16 +1196,27 @@ def test_simulator_http_handler_log_message(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_configure_windowless_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import logging
+    import subprocess
     import sys
 
     from src.antigravity_monitor.streamdeck_bridge import configure_windowless_logging
 
     log_path = tmp_path / "logs" / "plugin.log"
+    root_logger = logging.getLogger()
+    existing_handlers = list(root_logger.handlers)
+    previous_level = root_logger.level
+
+    console_handler = logging.StreamHandler(sys.__stderr__)
+    root_logger.addHandler(console_handler)
+
     monkeypatch.setattr("sys.stdout", None)
     monkeypatch.setattr("sys.stderr", None)
 
-    root_logger = logging.getLogger()
-    existing_handlers = set(root_logger.handlers)
+    # Simulate broken StreamHandler(None) registered when pythonw starts with stderr=None
+    broken_handler = logging.StreamHandler(None)
+    assert broken_handler.stream is None
+    root_logger.addHandler(broken_handler)
+
     created_stream = None
 
     try:
@@ -1213,6 +1224,9 @@ def test_configure_windowless_logging(tmp_path: Path, monkeypatch: pytest.Monkey
         assert configured == log_path
         assert sys.stdout is not None
         assert sys.stderr is not None
+        assert sys.stdout is sys.stderr
+        assert broken_handler not in root_logger.handlers
+        assert console_handler not in root_logger.handlers
         created_stream = sys.stdout
 
         print("hello windowless")
@@ -1226,14 +1240,63 @@ def test_configure_windowless_logging(tmp_path: Path, monkeypatch: pytest.Monkey
 
         content = log_path.read_text(encoding="utf-8")
         assert "hello windowless" in content
-        assert "logger entry" in content
+        assert content.count("logger entry") == 1
+        assert "--- Logging error ---" not in content
+        assert "AttributeError" not in content
     finally:
         for handler in list(root_logger.handlers):
             if handler not in existing_handlers:
                 root_logger.removeHandler(handler)
                 handler.close()
+        for handler in (broken_handler, console_handler):
+            if handler in root_logger.handlers:
+                root_logger.removeHandler(handler)
+            handler.close()
+        root_logger.setLevel(previous_level)
         if created_stream is not None:
             created_stream.close()
+
+    # Subprocess verification: import streamdeck_bridge from scratch with stdout=None, stderr=None
+    repo_root = Path(__file__).resolve().parent.parent
+    sub_log = tmp_path / "logs" / "subprocess_windowless.log"
+    code = (
+        "import sys; "
+        "sys.stdout = None; "
+        "sys.stderr = None; "
+        "from src.antigravity_monitor import streamdeck_bridge; "
+        f"streamdeck_bridge.configure_windowless_logging({str(sub_log)!r}); "
+        "streamdeck_bridge.logger.info('subprocess windowless ok'); "
+        "print('subprocess print ok')"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--- Logging error ---" not in proc.stderr
+    sub_content = sub_log.read_text(encoding="utf-8")
+    assert sub_content.count("subprocess windowless ok") == 1
+    assert "subprocess print ok" in sub_content
+    assert "--- Logging error ---" not in sub_content
+    assert "AttributeError" not in sub_content
+
+
+def test_is_venv_healthy_requires_pythonw_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.antigravity_monitor.installer import get_venv_pythonw, is_venv_healthy
+
+    project_root = tmp_path / "repo"
+    scripts_dir = project_root / ".venv" / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "python.exe").write_bytes(b"")
+
+    monkeypatch.setattr("sys.platform", "win32")
+    assert get_venv_pythonw(project_root) == scripts_dir / "pythonw.exe"
+    # pythonw.exe is missing, so venv must be reported unhealthy
+    assert is_venv_healthy(project_root) is False
 
 
 def test_ensure_uv_available_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1322,3 +1385,148 @@ def test_build_windowless_launcher_and_install_plugin(
 
     assert uninstall_plugin(source_dir.name) is True
     assert not dest_dir.exists()
+
+
+def test_install_and_uninstall_handles_broken_and_active_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.antigravity_monitor.installer import install_plugin, uninstall_plugin
+
+    appdata_dir = tmp_path / "appdata"
+    plugins_dir = appdata_dir / "Elgato" / "StreamDeck" / "Plugins"
+    plugins_dir.mkdir(parents=True)
+    monkeypatch.setenv("APPDATA", str(appdata_dir))
+
+    plugin_name = "com.user.antigravity.sdPlugin"
+    dest_dir = plugins_dir / plugin_name
+
+    # Create a broken symlink (target does not exist)
+    missing_target = tmp_path / "deleted_source" / plugin_name
+    try:
+        dest_dir.symlink_to(missing_target, target_is_directory=True)
+    except OSError:
+        pytest.skip("Symlink creation requires elevated privileges or Developer Mode")
+
+    assert dest_dir.is_symlink()
+    assert not dest_dir.exists()
+
+    # uninstall_plugin must remove broken symlink
+    assert uninstall_plugin(plugin_name) is True
+    assert not dest_dir.is_symlink()
+
+    # Re-create broken symlink and ensure install_plugin replaces it cleanly
+    dest_dir.symlink_to(missing_target, target_is_directory=True)
+    source_dir = tmp_path / "source" / plugin_name
+    source_dir.mkdir(parents=True)
+    (source_dir / "manifest.json").write_text('{"CodePathWin": "antigravity_launcher.exe"}')
+
+    installed_dir = install_plugin(
+        source_dir=source_dir,
+        symlink=True,
+        setup_venv=False,
+        build_launcher=False,
+    )
+    assert installed_dir == dest_dir
+    assert installed_dir.is_symlink()
+    assert (source_dir / "project_path.txt").is_file()
+    # Place dummy antigravity_launcher.exe to verify symlink uninstall cleans generated files
+    (source_dir / "antigravity_launcher.exe").write_bytes(b"MZ")
+
+    assert uninstall_plugin(plugin_name) is True
+    assert not dest_dir.is_symlink()
+    assert not (source_dir / "project_path.txt").exists()
+    assert not (source_dir / "antigravity_launcher.exe").exists()
+
+
+def test_windowless_launcher_exe_passes_json_info_and_logs_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import sys
+
+    from src.antigravity_monitor.installer import build_windowless_launcher, find_csc_compiler
+
+    if find_csc_compiler() is None:
+        pytest.skip("csc.exe not available in this environment")
+
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir(parents=True)
+    launcher_exe = build_windowless_launcher(plugin_dir / "antigravity_launcher.exe")
+
+    # Dummy project layout expected by launcher
+    proj_dir = tmp_path / "dummy_proj"
+    pkg_dir = proj_dir / "src" / "antigravity_monitor"
+    pkg_dir.mkdir(parents=True)
+    (proj_dir / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    captured_file = tmp_path / "captured_args.json"
+    (pkg_dir / "streamdeck_bridge.py").write_text(
+        "import argparse, json, os, sys\n"
+        "from pathlib import Path\n"
+        "parser = argparse.ArgumentParser()\n"
+        "parser.add_argument('-port', type=int)\n"
+        "parser.add_argument('-pluginUUID')\n"
+        "parser.add_argument('-registerEvent')\n"
+        "parser.add_argument('-info')\n"
+        "parser.add_argument('--fail', action='store_true')\n"
+        "args = parser.parse_args()\n"
+        "if args.fail:\n"
+        "    sys.stderr.write('simulated startup crash\\n')\n"
+        "    sys.exit(42)\n"
+        "out = {'port': args.port, 'uuid': args.pluginUUID, 'event': args.registerEvent, "
+        "'info': json.loads(args.info), 'log_env': os.environ.get('ANTIGRAVITY_LOG_FILE')}\n"
+        f"Path({str(captured_file)!r}).write_text(json.dumps(out), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "project_path.txt").write_text(str(proj_dir), encoding="utf-8")
+
+    info_payload = json.dumps(
+        {
+            "application": {"language": "en", "platform": "windows", "version": "6.5.0"},
+            "plugin": {"uuid": "com.user.antigravity", "path": 'C:\\Program Files\\Elgato "SD"\\'},
+        }
+    )
+
+    env = os.environ.copy()
+    env.pop("ANTIGRAVITY_PROJECT_DIR", None)
+    env["ANTIGRAVITY_PYTHON"] = sys.executable
+
+    proc_ok = subprocess.run(
+        [
+            str(launcher_exe),
+            "-port",
+            "28196",
+            "-pluginUUID",
+            "uuid-1234",
+            "-registerEvent",
+            "registerPlugin",
+            "-info",
+            info_payload,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert proc_ok.returncode == 0
+    captured = json.loads(captured_file.read_text(encoding="utf-8"))
+    assert captured["port"] == 28196
+    assert captured["uuid"] == "uuid-1234"
+    assert captured["event"] == "registerPlugin"
+    assert captured["info"] == json.loads(info_payload)
+    assert Path(captured["log_env"]).resolve() == (plugin_dir / "plugin.log").resolve()
+
+    # Verify stderr and non-zero exit code are logged to plugin.log
+    proc_fail = subprocess.run(
+        [str(launcher_exe), "--fail"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert proc_fail.returncode == 42
+    log_text = (plugin_dir / "plugin.log").read_text(encoding="utf-8")
+    assert "[STDERR] simulated startup crash" in log_text
+    assert "[ERROR] Python process exited with code 42." in log_text
+    assert "[WARN]" not in log_text

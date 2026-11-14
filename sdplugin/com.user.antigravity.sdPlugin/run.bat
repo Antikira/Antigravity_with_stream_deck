@@ -53,5 +53,9 @@ if defined ANTIGRAVITY_PYTHON (
 )
 
 echo [%DATE% %TIME%] Starting Antigravity Stream Deck plugin in "%PROJECT_DIR%" using "%PY_CMD%" >> "%LOG_FILE%"
-"%PY_CMD%" -u -m src.antigravity_monitor.streamdeck_bridge %* >> "%LOG_FILE%" 2>&1
+"%PY_CMD%" -u -m src.antigravity_monitor.streamdeck_bridge %*
+if errorlevel 1 (
+    echo [%DATE% %TIME%] [ERROR] Antigravity Stream Deck plugin exited with code !ERRORLEVEL!. >> "%LOG_FILE%"
+    exit /b !ERRORLEVEL!
+)
 

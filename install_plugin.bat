@@ -10,8 +10,31 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "IS_UNINSTALL=0"
+for %%A in (%*) do (
+    if /I "%%~A"=="--uninstall" set "IS_UNINSTALL=1"
+)
+
+if "%IS_UNINSTALL%"=="1" (
+    echo Uninstalling Antigravity Stream Deck plugin...
+    if exist "%~dp0.venv\Scripts\python.exe" (
+        "%~dp0.venv\Scripts\python.exe" -m src.antigravity_monitor.installer %*
+    ) else (
+        uv run --no-sync python -m src.antigravity_monitor.installer %*
+    )
+    if errorlevel 1 (
+        echo [ERROR] Plugin uninstallation failed.
+        exit /b 1
+    )
+    echo Uninstallation completed successfully.
+    endlocal
+    exit /b 0
+)
+
 set "VENV_NEED_CREATE=0"
 if not exist "%~dp0.venv\Scripts\python.exe" (
+    set "VENV_NEED_CREATE=1"
+) else if not exist "%~dp0.venv\Scripts\pythonw.exe" (
     set "VENV_NEED_CREATE=1"
 ) else (
     "%~dp0.venv\Scripts\python.exe" -c "import sys" >nul 2>&1

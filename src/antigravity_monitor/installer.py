@@ -19,12 +19,73 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace AntigravityLauncher
 {
     internal static class Program
     {
+        private const int JobObjectExtendedLimitInformation = 9;
+        private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+        private static readonly object LogLock = new object();
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IO_COUNTERS
+        {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+            public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetInformationJobObject(
+            IntPtr hJob,
+            int jobObjectInfoClass,
+            IntPtr lpJobObjectInfo,
+            uint cbJobObjectInfoLength
+        );
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
         private static void AppendLog(string logFile, string message)
         {
             try
@@ -35,10 +96,72 @@ namespace AntigravityLauncher
                     message,
                     Environment.NewLine
                 );
-                File.AppendAllText(logFile, line, Encoding.UTF8);
+                lock (LogLock)
+                {
+                    using (
+                        var fs = new FileStream(
+                            logFile,
+                            FileMode.Append,
+                            FileAccess.Write,
+                            FileShare.ReadWrite | FileShare.Delete
+                        )
+                    )
+                    using (var writer = new StreamWriter(fs, new UTF8Encoding(false)))
+                    {
+                        writer.Write(line);
+                    }
+                }
             }
             catch
             {
+            }
+        }
+
+        private static IntPtr CreateKillOnCloseJob(string logFile)
+        {
+            try
+            {
+                IntPtr hJob = CreateJobObject(IntPtr.Zero, null);
+                if (hJob == IntPtr.Zero)
+                {
+                    return IntPtr.Zero;
+                }
+
+                var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+                IntPtr infoPtr = Marshal.AllocHGlobal(length);
+                try
+                {
+                    Marshal.StructureToPtr(info, infoPtr, false);
+                    if (
+                        !SetInformationJobObject(
+                            hJob,
+                            JobObjectExtendedLimitInformation,
+                            infoPtr,
+                            (uint)length
+                        )
+                    )
+                    {
+                        AppendLog(
+                            logFile,
+                            "[WARN] SetInformationJobObject failed: "
+                                + Marshal.GetLastWin32Error()
+                        );
+                        CloseHandle(hJob);
+                        return IntPtr.Zero;
+                    }
+                    return hJob;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(infoPtr);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog(logFile, "[WARN] Failed to create Job Object: " + ex.Message);
+                return IntPtr.Zero;
             }
         }
 
@@ -187,11 +310,14 @@ namespace AntigravityLauncher
                 WorkingDirectory = projectDir,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardError = true,
+                StandardErrorEncoding = Encoding.UTF8
             };
             psi.EnvironmentVariables["PYTHONPATH"] = projectDir;
             psi.EnvironmentVariables["ANTIGRAVITY_LOG_FILE"] = logFile;
 
+            IntPtr jobHandle = CreateKillOnCloseJob(logFile);
             try
             {
                 using (Process proc = Process.Start(psi))
@@ -201,7 +327,46 @@ namespace AntigravityLauncher
                         AppendLog(logFile, "[ERROR] Failed to launch python process.");
                         return 1;
                     }
+
+                    if (jobHandle != IntPtr.Zero)
+                    {
+                        try
+                        {
+                            if (!AssignProcessToJobObject(jobHandle, proc.Handle))
+                            {
+                                AppendLog(
+                                    logFile,
+                                    "[WARN] AssignProcessToJobObject failed: "
+                                        + Marshal.GetLastWin32Error()
+                                );
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendLog(
+                                logFile,
+                                "[WARN] AssignProcessToJobObject exception: " + ex.Message
+                            );
+                        }
+                    }
+
+                    proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+                    {
+                        if (!string.IsNullOrEmpty(e.Data))
+                        {
+                            AppendLog(logFile, "[STDERR] " + e.Data);
+                        }
+                    };
+                    proc.BeginErrorReadLine();
                     proc.WaitForExit();
+
+                    if (proc.ExitCode != 0)
+                    {
+                        AppendLog(
+                            logFile,
+                            "[ERROR] Python process exited with code " + proc.ExitCode + "."
+                        );
+                    }
                     return proc.ExitCode;
                 }
             }
@@ -209,6 +374,13 @@ namespace AntigravityLauncher
             {
                 AppendLog(logFile, "[ERROR] Exception launching python process: " + ex);
                 return 1;
+            }
+            finally
+            {
+                if (jobHandle != IntPtr.Zero)
+                {
+                    CloseHandle(jobHandle);
+                }
             }
         }
     }
@@ -233,16 +405,16 @@ def ensure_uv_available() -> str:
 
 
 def get_venv_pythonw(project_root: Path) -> Path:
-    """Return the isolated virtual environment pythonw/python executable path."""
-    candidates = [
-        project_root / ".venv" / "Scripts" / "pythonw.exe",
-        project_root / ".venv" / "Scripts" / "python.exe",
-        project_root / ".venv" / "bin" / "python",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return candidates[0]
+    """Return the isolated virtual environment windowless Python executable path."""
+    if sys.platform == "win32":
+        return project_root / ".venv" / "Scripts" / "pythonw.exe"
+    win_pythonw = project_root / ".venv" / "Scripts" / "pythonw.exe"
+    if win_pythonw.is_file():
+        return win_pythonw
+    posix_python = project_root / ".venv" / "bin" / "python"
+    if posix_python.is_file():
+        return posix_python
+    return win_pythonw
 
 
 def is_venv_healthy(project_root: Path) -> bool:
@@ -362,8 +534,10 @@ def install_plugin(
 
     dest_dir = target_plugins_dir / source_dir.name
 
-    if dest_dir.exists() and dest_dir.is_symlink():
+    if dest_dir.is_symlink():
         dest_dir.unlink()
+    elif symlink and dest_dir.exists():
+        shutil.rmtree(dest_dir)
 
     installed_via_symlink = False
     if symlink:
@@ -401,12 +575,19 @@ def uninstall_plugin(plugin_name: str = "com.user.antigravity.sdPlugin") -> bool
     target_plugins_dir = get_streamdeck_plugins_dir()
     dest_dir = target_plugins_dir / plugin_name
 
-    if not dest_dir.exists():
+    if not dest_dir.exists() and not dest_dir.is_symlink():
         print(f"Plugin not found at {dest_dir}")
         return False
 
     print(f"Uninstalling {dest_dir}...")
     if dest_dir.is_symlink():
+        for artifact_name in ("antigravity_launcher.exe", "project_path.txt"):
+            artifact_path = dest_dir / artifact_name
+            try:
+                if artifact_path.is_file():
+                    artifact_path.unlink()
+            except OSError:
+                pass
         dest_dir.unlink()
     else:
         shutil.rmtree(dest_dir)

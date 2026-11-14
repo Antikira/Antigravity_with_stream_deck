@@ -40,18 +40,27 @@ from src.antigravity_monitor.session_page_manager import (
 from src.antigravity_monitor.state_store import MonitorSnapshot, StateStore
 from src.antigravity_monitor.window_focus import WindowFocusManager
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 logger = logging.getLogger("streamdeck_bridge")
 
 
 def configure_windowless_logging(log_file: Path | str | None = None) -> Path | None:
-    """Redirect stdout/stderr and root logger to a file when running under pythonw."""
+    """Configure logging and redirect stdout/stderr when running under pythonw."""
+    root_logger = logging.getLogger()
+
+    # Remove broken StreamHandler(None) instances registered before stdio redirection.
+    for handler in list(root_logger.handlers):
+        if type(handler) is logging.StreamHandler and getattr(handler, "stream", None) is None:
+            root_logger.removeHandler(handler)
+            handler.close()
+
     env_log = log_file or os.environ.get("ANTIGRAVITY_LOG_FILE")
     is_windowless = (sys.stdout is None) or (sys.stderr is None)
     if not is_windowless and not env_log:
+        if not root_logger.handlers:
+            logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+        elif root_logger.level == logging.NOTSET or root_logger.level > logging.INFO:
+            root_logger.setLevel(logging.INFO)
         return None
 
     target_log = (
@@ -61,25 +70,42 @@ def configure_windowless_logging(log_file: Path | str | None = None) -> Path | N
     )
     target_log.parent.mkdir(parents=True, exist_ok=True)
 
-    if is_windowless:
-        stream = target_log.open("a", encoding="utf-8", buffering=1)
-        if sys.stdout is None:
-            sys.stdout = stream
-        if sys.stderr is None:
-            sys.stderr = stream
+    # Remove standard-stream StreamHandlers (keeping subclasses like pytest LogCaptureHandler)
+    # to avoid duplicate log output or write errors when stdio is redirected.
+    std_streams = {None, sys.stdout, sys.stderr, sys.__stdout__, sys.__stderr__}
+    for handler in list(root_logger.handlers):
+        if (
+            type(handler) is logging.StreamHandler
+            and getattr(handler, "stream", None) in std_streams
+        ):
+            root_logger.removeHandler(handler)
+            handler.close()
 
-    root_logger = logging.getLogger()
     resolved_target = target_log.resolve()
-    has_handler = any(
-        isinstance(h, logging.FileHandler) and Path(h.baseFilename).resolve() == resolved_target
-        for h in root_logger.handlers
-    )
-    if not has_handler:
-        handler = logging.FileHandler(target_log, encoding="utf-8")
-        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-        root_logger.addHandler(handler)
-        if root_logger.level == logging.NOTSET:
-            root_logger.setLevel(logging.INFO)
+    file_handler: logging.FileHandler | None = None
+    for handler in root_logger.handlers:
+        if (
+            isinstance(handler, logging.FileHandler)
+            and Path(handler.baseFilename).resolve() == resolved_target
+        ):
+            file_handler = handler
+            break
+
+    if file_handler is None:
+        file_handler = logging.FileHandler(target_log, encoding="utf-8")
+        file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+        root_logger.addHandler(file_handler)
+
+    if root_logger.level == logging.NOTSET or root_logger.level > logging.INFO:
+        root_logger.setLevel(logging.INFO)
+
+    if is_windowless and file_handler.stream is not None:
+        if hasattr(file_handler.stream, "reconfigure"):
+            file_handler.stream.reconfigure(line_buffering=True)
+        if sys.stdout is None:
+            sys.stdout = file_handler.stream
+        if sys.stderr is None:
+            sys.stderr = file_handler.stream
 
     return target_log
 

@@ -73,7 +73,7 @@ install_plugin.bat
 
 または、すでに `.venv` が構築済みの環境からは以下でも実行できます：
 ```bash
-uv run python -m src.antigravity_monitor.installer
+uv run python -m src.antigravity_monitor.installer --skip-venv
 ```
 
 インストール時に以下が自動実行されます：

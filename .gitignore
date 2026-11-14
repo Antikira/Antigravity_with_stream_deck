@@ -8,6 +8,8 @@ __pycache__/
 *.log
 sdplugin/**/project_path.txt
 project_path.txt
+sdplugin/**/antigravity_launcher.exe
+antigravity_launcher.exe
 
 # Environment variables & secrets
 .env
