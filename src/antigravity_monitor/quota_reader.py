@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -212,12 +213,14 @@ class QuotaReader:
                     startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
                     kwargs["startupinfo"] = startupinfo
 
+            agy_executable = shutil.which("agy") or "agy"
             result = subprocess.run(
-                ["agy", "-p", "/usage"],
+                [agy_executable, "-p", "/usage"],
                 capture_output=True,
                 text=True,
                 check=True,
                 timeout=15.0,
+                stdin=subprocess.DEVNULL,
                 **kwargs,
             )
             return result.stdout
