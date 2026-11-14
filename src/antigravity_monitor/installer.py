@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _LAUNCHER_CS_SOURCE = r"""
@@ -481,6 +482,52 @@ def find_csc_compiler() -> Path | None:
     return None
 
 
+def _is_file_locked(path: Path) -> bool:
+    """Return True if an existing file is currently locked by another process."""
+    if not path.is_file():
+        return False
+    try:
+        with path.open("ab"):
+            return False
+    except OSError:
+        return True
+
+
+def stop_running_launcher(exe_name: str = "antigravity_launcher.exe") -> None:
+    """Terminate running launcher and child processes on Windows to release file locks."""
+    if sys.platform != "win32":
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/IM", exe_name],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            timeout=5.0,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def _replace_executable(src_exe: Path, dest_exe: Path) -> None:
+    """Copy compiled executable into place, stopping a running launcher if locked."""
+    dest_exe.parent.mkdir(parents=True, exist_ok=True)
+    if _is_file_locked(dest_exe):
+        stop_running_launcher(dest_exe.name)
+
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        try:
+            shutil.copy2(src_exe, dest_exe)
+            return
+        except PermissionError:
+            if attempt == max_attempts - 1:
+                raise
+            stop_running_launcher(dest_exe.name)
+            time.sleep(0.2)
+
+
 def build_windowless_launcher(output_exe: Path) -> Path:
     """Compile a GUI-subsystem Windows launcher executable with no console window."""
     csc = find_csc_compiler()
@@ -490,24 +537,30 @@ def build_windowless_launcher(output_exe: Path) -> Path:
     output_exe.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmpdir:
         cs_file = Path(tmpdir) / "launcher.cs"
+        temp_exe = Path(tmpdir) / "launcher.exe"
         cs_file.write_text(_LAUNCHER_CS_SOURCE, encoding="utf-8")
         try:
             subprocess.run(
                 [
                     str(csc),
                     "/nologo",
+                    "/utf8output",
                     "/target:winexe",
                     "/optimize+",
-                    f"/out:{output_exe}",
+                    f"/out:{temp_exe}",
                     str(cs_file),
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
             )
         except subprocess.CalledProcessError as exc:
             details = (exc.stderr or exc.stdout or str(exc)).strip()
             raise RuntimeError(f"Failed to compile windowless launcher: {details}") from exc
+
+        _replace_executable(temp_exe, output_exe)
 
     return output_exe
 
@@ -526,13 +579,19 @@ def install_plugin(
     if not source_dir.is_dir():
         raise FileNotFoundError(f"Plugin source directory not found: {source_dir}")
 
+    target_plugins_dir = get_streamdeck_plugins_dir()
+    dest_dir = target_plugins_dir / source_dir.name
+
+    # Stop an already-running launcher before syncing .venv or replacing plugin binaries.
+    if _is_file_locked(dest_dir / "antigravity_launcher.exe") or _is_file_locked(
+        get_venv_pythonw(project_root)
+    ):
+        stop_running_launcher("antigravity_launcher.exe")
+
     if setup_venv:
         setup_isolated_venv(project_root)
 
-    target_plugins_dir = get_streamdeck_plugins_dir()
     target_plugins_dir.mkdir(parents=True, exist_ok=True)
-
-    dest_dir = target_plugins_dir / source_dir.name
 
     if dest_dir.is_symlink():
         dest_dir.unlink()
@@ -580,6 +639,10 @@ def uninstall_plugin(plugin_name: str = "com.user.antigravity.sdPlugin") -> bool
         return False
 
     print(f"Uninstalling {dest_dir}...")
+    if _is_file_locked(dest_dir / "antigravity_launcher.exe"):
+        stop_running_launcher("antigravity_launcher.exe")
+        time.sleep(0.2)
+
     if dest_dir.is_symlink():
         for artifact_name in ("antigravity_launcher.exe", "project_path.txt"):
             artifact_path = dest_dir / artifact_name

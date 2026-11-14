@@ -1530,3 +1530,71 @@ def test_windowless_launcher_exe_passes_json_info_and_logs_failures(
     assert "[STDERR] simulated startup crash" in log_text
     assert "[ERROR] Python process exited with code 42." in log_text
     assert "[WARN]" not in log_text
+
+
+def test_build_windowless_launcher_decodes_utf8_compiler_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.antigravity_monitor.installer import build_windowless_launcher
+
+    monkeypatch.setattr(
+        "src.antigravity_monitor.installer.find_csc_compiler",
+        lambda: Path("C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"),
+    )
+
+    captured_calls: list[tuple[list[str], dict[str, object]]] = []
+    japanese_err = "error CS0016: 出力ファイルに書き込めませんでした。別のプロセスが使用中です。"
+
+    def fake_run(cmd: list[str], **kwargs: object):
+        captured_calls.append((cmd, kwargs))
+        raise subprocess.CalledProcessError(returncode=1, cmd=cmd, stderr=japanese_err)
+
+    monkeypatch.setattr("src.antigravity_monitor.installer.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError, match="別のプロセスが使用中です") as exc_info:
+        build_windowless_launcher(tmp_path / "antigravity_launcher.exe")
+
+    assert japanese_err in str(exc_info.value)
+    assert len(captured_calls) == 1
+    cmd, kwargs = captured_calls[0]
+    assert "/utf8output" in cmd
+    assert kwargs.get("encoding") == "utf-8"
+    assert kwargs.get("errors") == "replace"
+
+
+def test_replace_executable_stops_locked_launcher_on_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil
+
+    from src.antigravity_monitor.installer import _replace_executable
+
+    src_exe = tmp_path / "temp" / "launcher.exe"
+    src_exe.parent.mkdir(parents=True)
+    src_exe.write_bytes(b"MZ-new")
+    dest_exe = tmp_path / "plugin" / "antigravity_launcher.exe"
+
+    stopped_names: list[str] = []
+    monkeypatch.setattr(
+        "src.antigravity_monitor.installer.stop_running_launcher",
+        lambda exe_name: stopped_names.append(exe_name),
+    )
+    monkeypatch.setattr("src.antigravity_monitor.installer.time.sleep", lambda _: None)
+
+    original_copy2 = shutil.copy2
+    attempts = 0
+
+    def flaky_copy2(src: Path, dst: Path) -> Path:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("locked by running process")
+        return original_copy2(src, dst)
+
+    monkeypatch.setattr("src.antigravity_monitor.installer.shutil.copy2", flaky_copy2)
+
+    _replace_executable(src_exe, dest_exe)
+
+    assert attempts == 2
+    assert stopped_names == ["antigravity_launcher.exe"]
+    assert dest_exe.read_bytes() == b"MZ-new"
