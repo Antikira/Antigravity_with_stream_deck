@@ -12,10 +12,18 @@ import os
 import re
 import sqlite3
 import urllib.parse
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from src.antigravity_monitor.extensibility_contracts import (
+    SessionStatusContext,
+    SessionStatusRuleProtocol,
+    SessionTitleContext,
+    TitleResolverRuleProtocol,
+)
 
 _NEGATIVE_STATES = ("DENIED", "REJECTED", "CANCEL", "CANCELLED", "CANCELING", "FAILED", "ERROR")
 
@@ -103,38 +111,84 @@ def _extract_workspace_name(workspace_uris: list[str]) -> str:
     return ""
 
 
+class ExplicitTitleRule:
+    """Resolve title from explicit session title."""
+
+    def resolve(self, context: SessionTitleContext) -> str | None:
+        cleaned = _clean_title_candidate(context.title)
+        return cleaned or None
+
+
+class PreviewTitleRule:
+    """Resolve title from session preview text."""
+
+    def resolve(self, context: SessionTitleContext) -> str | None:
+        cleaned = _clean_title_candidate(context.preview)
+        return cleaned or None
+
+
+class WorkspaceUriTitleRule:
+    """Resolve title from workspace folder name."""
+
+    def resolve(self, context: SessionTitleContext) -> str | None:
+        ws_name = _extract_workspace_name(context.workspace_uris)
+        return ws_name or None
+
+
+class FirstUserPromptTitleRule:
+    """Resolve title from first user prompt in transcript."""
+
+    def resolve(self, context: SessionTitleContext) -> str | None:
+        cleaned = _clean_title_candidate(context.first_user_prompt)
+        return cleaned or None
+
+
+class ConversationIdFallbackTitleRule:
+    """Fallback title derived from conversation ID."""
+
+    def resolve(self, context: SessionTitleContext) -> str | None:
+        cid = context.conversation_id.strip()
+        if cid:
+            return f"CLI-{cid[:6]}"
+        return None
+
+
+def _create_default_title_resolvers() -> list[TitleResolverRuleProtocol]:
+    return [
+        ExplicitTitleRule(),
+        PreviewTitleRule(),
+        WorkspaceUriTitleRule(),
+        FirstUserPromptTitleRule(),
+        ConversationIdFallbackTitleRule(),
+    ]
+
+
+DEFAULT_TITLE_RESOLVERS: tuple[TitleResolverRuleProtocol, ...] = tuple(
+    _create_default_title_resolvers()
+)
+
+
 def _resolve_session_title(
     title: str,
     preview: str = "",
     workspace_uris: list[str] | None = None,
     first_user_prompt: str = "",
     conversation_id: str = "",
+    resolvers: Sequence[TitleResolverRuleProtocol] | None = None,
 ) -> str:
     """Resolve session title using multi-tier fallback."""
-    # 1. Title
-    cleaned = _clean_title_candidate(title)
-    if cleaned:
-        return cleaned
-
-    # 2. Preview
-    cleaned = _clean_title_candidate(preview)
-    if cleaned:
-        return cleaned
-
-    # 3. Workspace folder name
-    ws_name = _extract_workspace_name(workspace_uris or [])
-    if ws_name:
-        return ws_name
-
-    # 4. First user prompt
-    cleaned = _clean_title_candidate(first_user_prompt)
-    if cleaned:
-        return cleaned
-
-    # 5. CLI-<cid[:6]> or "Session"
-    cid = conversation_id.strip()
-    if cid:
-        return f"CLI-{cid[:6]}"
+    context = SessionTitleContext(
+        title=title,
+        preview=preview,
+        workspace_uris=list(workspace_uris) if workspace_uris else [],
+        first_user_prompt=first_user_prompt,
+        conversation_id=conversation_id,
+    )
+    active_resolvers = DEFAULT_TITLE_RESOLVERS if resolvers is None else resolvers
+    for resolver in active_resolvers:
+        resolved = resolver.resolve(context)
+        if resolved:
+            return resolved
     return "Session"
 
 
@@ -167,16 +221,24 @@ class SessionInfo:
     last_step_status: str = ""
     window_handle: int = 0
     process_id: int = 0
+    title_resolvers: Sequence[TitleResolverRuleProtocol] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _title_resolved: bool = field(default=False, repr=False, compare=False)
 
     @property
     def short_title(self) -> str:
         """Return truncated title suitable for Stream Deck key display (max 14 chars)."""
-        resolved = _resolve_session_title(
-            self.title,
-            self.preview,
-            self.workspace_uris,
-            conversation_id=self.conversation_id,
-        )
+        if self._title_resolved and self.title:
+            resolved = self.title
+        else:
+            resolved = _resolve_session_title(
+                self.title,
+                self.preview,
+                self.workspace_uris,
+                conversation_id=self.conversation_id,
+                resolvers=self.title_resolvers,
+            )
         if len(resolved) > 12:
             return resolved[:11] + "…"
         return resolved
@@ -272,6 +334,90 @@ def _is_permission_or_waiting_tool(name: str) -> bool:
     return any(kw in clean for kw in keywords)
 
 
+class ExplicitWaitingStatusRule:
+    """Detect explicit waiting/approval status strings in DB or transcript."""
+
+    def evaluate(self, context: SessionStatusContext) -> SessionStatus | None:
+        if _is_waiting_status(context.db_status) or _is_waiting_status(
+            context.last_transcript_step.get("status")
+        ):
+            return SessionStatus.WAITING_FOR_APPROVAL
+        return None
+
+
+class ConversationDbWaitingRule:
+    """Detect waiting/approval states in the per-conversation SQLite steps DB."""
+
+    def evaluate(self, context: SessionStatusContext) -> SessionStatus | None:
+        db_step = context.conversation_db_step
+        if not db_step:
+            return None
+        # Antigravity status 9 indicates waiting for user approval / permission
+        if db_step.get("status") == 9:
+            return SessionStatus.WAITING_FOR_APPROVAL
+        if (
+            context.is_running
+            and db_step.get("status") == 2
+            and db_step.get("has_pending_permissions")
+        ):
+            return SessionStatus.WAITING_FOR_APPROVAL
+        return None
+
+
+class ToolCallWaitingRule:
+    """Detect waiting/approval states from transcript tool_calls entries."""
+
+    def evaluate(self, context: SessionStatusContext) -> SessionStatus | None:
+        tool_calls = context.last_transcript_step.get("tool_calls", [])
+        if not isinstance(tool_calls, list):
+            return None
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                continue
+            function = call.get("function")
+            function = function if isinstance(function, dict) else {}
+            name = function.get("name") or call.get("name")
+
+            # If the call explicitly specifies a waiting status
+            if _is_waiting_status(call.get("status")):
+                return SessionStatus.WAITING_FOR_APPROVAL
+
+            # Check for explicit permission / approval flags
+            for perm_key in (
+                "permission",
+                "requires_approval",
+                "needs_permission",
+                "waiting_for_approval",
+                "requires_permission",
+            ):
+                if call.get(perm_key) is True:
+                    return SessionStatus.WAITING_FOR_APPROVAL
+
+            # If tool requires permission (run_command, ask_question, write_to_file, etc.)
+            if name and _is_permission_or_waiting_tool(name):
+                if context.is_running or name == "ask_question":
+                    return SessionStatus.WAITING_FOR_APPROVAL
+        return None
+
+
+class RunningStatusRule:
+    """Classify active running sessions as WORKING."""
+
+    def evaluate(self, context: SessionStatusContext) -> SessionStatus | None:
+        if context.is_running:
+            return SessionStatus.WORKING
+        return None
+
+
+def _create_default_status_rules() -> list[SessionStatusRuleProtocol]:
+    return [
+        ExplicitWaitingStatusRule(),
+        ConversationDbWaitingRule(),
+        ToolCallWaitingRule(),
+        RunningStatusRule(),
+    ]
+
+
 class SessionDetector:
     """Detects and monitors Antigravity sessions."""
 
@@ -280,6 +426,8 @@ class SessionDetector:
         base_dir: Path | str | None = None,
         ignore_preexisting_done: bool = True,
         startup_time: datetime | None = None,
+        status_rules: Sequence[SessionStatusRuleProtocol] | None = None,
+        title_resolvers: Sequence[TitleResolverRuleProtocol] | None = None,
     ):
         if base_dir is None:
             user_profile = os.environ.get("USERPROFILE", os.path.expanduser("~"))
@@ -299,6 +447,40 @@ class SessionDetector:
 
         # Performance caches
         self._transcript_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+        # Extensible status & title rule pipelines
+        self._status_rules: list[SessionStatusRuleProtocol] = (
+            list(status_rules) if status_rules is not None else _create_default_status_rules()
+        )
+        self._title_resolvers: list[TitleResolverRuleProtocol] = (
+            list(title_resolvers)
+            if title_resolvers is not None
+            else _create_default_title_resolvers()
+        )
+        self._has_custom_title_resolvers: bool = title_resolvers is not None
+
+    def register_status_rule(
+        self,
+        rule: SessionStatusRuleProtocol,
+        prepend: bool = True,
+    ) -> None:
+        """Register a custom status evaluation rule on this detector instance."""
+        if prepend:
+            self._status_rules.insert(0, rule)
+        else:
+            self._status_rules.append(rule)
+
+    def register_title_resolver(
+        self,
+        resolver: TitleResolverRuleProtocol,
+        prepend: bool = True,
+    ) -> None:
+        """Register a custom title resolver rule on this detector instance."""
+        if prepend:
+            self._title_resolvers.insert(0, resolver)
+        else:
+            self._title_resolvers.append(resolver)
+        self._has_custom_title_resolvers = True
 
     def get_presence_locked_ids(self) -> set[str]:
         """Return set of conversation IDs that currently have presence lock files."""
@@ -429,63 +611,30 @@ class SessionDetector:
     ) -> SessionStatus:
         """Determine whether session is WORKING, WAITING_FOR_APPROVAL, or DONE.
 
-        Rules:
-        1. If db_status or last transcript step indicates waiting/permission -> WAITING_FOR_APPROVAL
-        2. If SQLite conversation DB has status 9 (waiting approval) -> WAITING_FOR_APPROVAL
-        3. If last transcript step has tool_calls requiring permission or user input
-           while active/running -> WAITING_FOR_APPROVAL
-        4. If not_fully_idle or db_status is RUNNING -> WORKING
-        5. Otherwise -> DONE
+        Evaluates registered status rules in order against a SessionStatusContext,
+        falling back to SessionStatus.DONE when no rule matches.
         """
-        if _is_waiting_status(db_status) or _is_waiting_status(last_transcript_step.get("status")):
-            return SessionStatus.WAITING_FOR_APPROVAL
-
+        last_step = last_transcript_step if isinstance(last_transcript_step, dict) else {}
         is_running = (
             bool(not_fully_idle)
-            or "RUNNING" in db_status.upper()
-            or last_transcript_step.get("status") == "RUNNING"
+            or "RUNNING" in (db_status or "").upper()
+            or last_step.get("status") == "RUNNING"
         )
-
-        # Check SQLite conversation DB for pending approval status (status 9)
-        if conversation_id:
-            db_step = self.inspect_conversation_db(conversation_id)
-            # Antigravity status 9 indicates waiting for user approval / permission
-            if db_step.get("status") == 9:
-                return SessionStatus.WAITING_FOR_APPROVAL
-            if is_running and db_step.get("status") == 2 and db_step.get("has_pending_permissions"):
-                return SessionStatus.WAITING_FOR_APPROVAL
-
-        tool_calls = last_transcript_step.get("tool_calls", [])
-        if isinstance(tool_calls, list):
-            for call in tool_calls:
-                if not isinstance(call, dict):
-                    continue
-                function = call.get("function")
-                function = function if isinstance(function, dict) else {}
-                name = function.get("name") or call.get("name")
-
-                # If the call explicitly specifies a waiting status
-                if _is_waiting_status(call.get("status")):
-                    return SessionStatus.WAITING_FOR_APPROVAL
-
-                # Check for explicit permission / approval flags
-                for perm_key in (
-                    "permission",
-                    "requires_approval",
-                    "needs_permission",
-                    "waiting_for_approval",
-                    "requires_permission",
-                ):
-                    if call.get(perm_key) is True:
-                        return SessionStatus.WAITING_FOR_APPROVAL
-
-                # If tool requires permission (run_command, ask_question, write_to_file, etc.)
-                if name and _is_permission_or_waiting_tool(name):
-                    if is_running or name == "ask_question":
-                        return SessionStatus.WAITING_FOR_APPROVAL
-
-        if is_running:
-            return SessionStatus.WORKING
+        conversation_db_step = (
+            self.inspect_conversation_db(conversation_id) if conversation_id else {}
+        )
+        context = SessionStatusContext(
+            db_status=db_status,
+            not_fully_idle=not_fully_idle,
+            last_transcript_step=last_step,
+            conversation_id=conversation_id,
+            is_running=is_running,
+            conversation_db_step=conversation_db_step,
+        )
+        for rule in self._status_rules:
+            status = rule.evaluate(context)
+            if status is not None:
+                return status
 
         return SessionStatus.DONE
 
@@ -565,10 +714,15 @@ class SessionDetector:
                 if self.ignore_preexisting_done and (cid not in self._actively_tracked_ids):
                     continue
 
-                if not title.strip():
+                title_resolved = False
+                if self._has_custom_title_resolvers or not title.strip():
                     first_user_prompt = ""
-                    if not _clean_title_candidate(preview) and not _extract_workspace_name(
-                        workspace_uris
+                    if not title.strip() and (
+                        self._has_custom_title_resolvers
+                        or (
+                            not _clean_title_candidate(preview)
+                            and not _extract_workspace_name(workspace_uris)
+                        )
                     ):
                         first_user_prompt = self.extract_first_user_prompt(cid)
                     title = _resolve_session_title(
@@ -577,7 +731,9 @@ class SessionDetector:
                         workspace_uris=workspace_uris,
                         first_user_prompt=first_user_prompt,
                         conversation_id=cid,
+                        resolvers=self._title_resolvers,
                     )
+                    title_resolved = True
 
                 session = SessionInfo(
                     conversation_id=cid,
@@ -592,6 +748,8 @@ class SessionDetector:
                     raw_status=raw_status,
                     last_step_type=transcript_info.get("type", ""),
                     last_step_status=transcript_info.get("status", ""),
+                    title_resolvers=tuple(self._title_resolvers),
+                    _title_resolved=title_resolved,
                 )
                 sessions.append(session)
 

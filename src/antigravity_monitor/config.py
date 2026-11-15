@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.antigravity_monitor.extensibility_contracts import (
+    SessionFilterAndSortRegistry,
+)
 from src.antigravity_monitor.session_detector import (
     SessionInfo,
     SessionStatus,
@@ -39,6 +42,166 @@ DEFAULT_HUB_SORT_CRITERIA: list[dict[str, Any]] = [
 ]
 
 
+def parse_session_datetime(val: str | datetime | None) -> datetime | None:
+    """Parse session datetime string to UTC-aware datetime."""
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        if val.tzinfo is None:
+            return val.replace(tzinfo=timezone.utc)
+        return val.astimezone(timezone.utc)
+
+    # First try ISO parse via _parse_db_datetime
+    dt = _parse_db_datetime(str(val))
+    if dt is not None:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    # Try standard fromisoformat
+    try:
+        dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+class InactiveUnlockedFilterRule:
+    """Exclude unlocked sessions without active presence when configured."""
+
+    def check_visibility(
+        self,
+        session: SessionInfo,
+        config: ConversationListConfig,
+        now: datetime,
+    ) -> bool | None:
+        if config.exclude_inactive_unlocked and not session.is_active_presence:
+            return False
+        return None
+
+
+class ProtectedStatusFilterRule:
+    """Protect WAITING_FOR_APPROVAL and WORKING sessions from age-based pruning."""
+
+    def check_visibility(
+        self,
+        session: SessionInfo,
+        config: ConversationListConfig,
+        now: datetime,
+    ) -> bool | None:
+        if config.protect_waiting_sessions and session.status == SessionStatus.WAITING_FOR_APPROVAL:
+            return True
+        if config.protect_working_sessions and session.status == SessionStatus.WORKING:
+            return True
+        return None
+
+
+class DoneRetentionFilterRule:
+    """Drop DONE sessions exceeding the configured retention minutes."""
+
+    def check_visibility(
+        self,
+        session: SessionInfo,
+        config: ConversationListConfig,
+        now: datetime,
+    ) -> bool | None:
+        if session.status != SessionStatus.DONE:
+            return None
+        # 0: Immediate drop
+        if config.done_retention_minutes == 0:
+            return False
+        # > 0: Drop if older than specified minutes
+        if config.done_retention_minutes > 0:
+            session_dt = parse_session_datetime(session.updated_at)
+            if session_dt:
+                age_minutes = (now - session_dt).total_seconds() / 60.0
+                if age_minutes > config.done_retention_minutes:
+                    return False
+        # -1: Retain indefinitely (proceeds to inactivity check)
+        return None
+
+
+class InactivityDaysFilterRule:
+    """Drop sessions inactive longer than max_inactivity_days."""
+
+    def check_visibility(
+        self,
+        session: SessionInfo,
+        config: ConversationListConfig,
+        now: datetime,
+    ) -> bool | None:
+        if config.max_inactivity_days > 0:
+            session_dt = parse_session_datetime(session.updated_at)
+            if session_dt:
+                age_days = (now - session_dt).total_seconds() / 86400.0
+                if age_days > config.max_inactivity_days:
+                    return False
+        return None
+
+
+def _status_sort_key(session: SessionInfo, ascending: bool) -> int:
+    if session.status == SessionStatus.WAITING_FOR_APPROVAL:
+        val = 2
+    elif session.status == SessionStatus.WORKING:
+        val = 1
+    else:
+        val = 0
+    return val if ascending else -val
+
+
+def _updated_at_sort_key(session: SessionInfo, ascending: bool) -> float:
+    dt = parse_session_datetime(session.updated_at)
+    ts = dt.timestamp() if dt else 0.0
+    return ts if ascending else -ts
+
+
+def _title_sort_key(session: SessionInfo, ascending: bool) -> str | list[int]:
+    t = (session.title or "").lower()
+    # For string descending sort in tuple: invert char ordinals
+    return t if ascending else [-ord(c) for c in t]
+
+
+def create_default_filter_sort_registry() -> SessionFilterAndSortRegistry:
+    """Create a SessionFilterAndSortRegistry pre-populated with default rules and fields."""
+    registry = SessionFilterAndSortRegistry()
+    registry.register_filter_rule(InactiveUnlockedFilterRule())
+    registry.register_filter_rule(ProtectedStatusFilterRule())
+    registry.register_filter_rule(DoneRetentionFilterRule())
+    registry.register_filter_rule(InactivityDaysFilterRule())
+    registry.register_sort_field("status", _status_sort_key)
+    registry.register_sort_field("updated_at", _updated_at_sort_key)
+    registry.register_sort_field("title", _title_sort_key)
+    return registry
+
+
+DEFAULT_FILTER_SORT_REGISTRY = create_default_filter_sort_registry()
+
+
+def _parse_sort_criteria_list(
+    raw_criteria: Any,
+    default_criteria: list[dict[str, Any]],
+    registry: SessionFilterAndSortRegistry | None = None,
+) -> list[dict[str, Any]]:
+    """Parse and validate sort criteria against registered sort fields."""
+    active_registry = registry or DEFAULT_FILTER_SORT_REGISTRY
+    valid_fields = active_registry.valid_sort_fields()
+    sort_criteria: list[dict[str, Any]] = []
+    if isinstance(raw_criteria, list):
+        for item in raw_criteria:
+            if isinstance(item, dict) and item.get("field") in valid_fields:
+                sort_criteria.append(
+                    {
+                        "field": item["field"],
+                        "ascending": bool(item.get("ascending", False)),
+                    }
+                )
+    if not sort_criteria:
+        return [dict(c) for c in default_criteria]
+    return sort_criteria
+
+
 @dataclass
 class HubConfig:
     """Per-instance configuration for Summary Hub key."""
@@ -58,7 +221,11 @@ class HubConfig:
         return self.hub_done_timeout_seconds is not None and self.hub_done_timeout_seconds >= 0
 
     @classmethod
-    def from_settings(cls, settings: dict[str, Any] | None) -> HubConfig:
+    def from_settings(
+        cls,
+        settings: dict[str, Any] | None,
+        registry: SessionFilterAndSortRegistry | None = None,
+    ) -> HubConfig:
         """Create HubConfig from per-key Stream Deck settings dictionary."""
         if not settings or not isinstance(settings, dict):
             return cls()
@@ -78,24 +245,11 @@ class HubConfig:
                 except (ValueError, TypeError):
                     timeout = None
 
-        raw_criteria = settings.get("hub_sort_criteria")
-        sort_criteria = []
-        if isinstance(raw_criteria, list):
-            valid_fields = {"status", "updated_at", "title"}
-            for item in raw_criteria:
-                if isinstance(item, dict) and item.get("field") in valid_fields:
-                    sort_criteria.append(
-                        {
-                            "field": item["field"],
-                            "ascending": bool(item.get("ascending", False)),
-                        }
-                    )
-        if not sort_criteria:
-            sort_criteria = [
-                {"field": "status", "ascending": False},
-                {"field": "updated_at", "ascending": False},
-                {"field": "title", "ascending": True},
-            ]
+        sort_criteria = _parse_sort_criteria_list(
+            settings.get("hub_sort_criteria"),
+            DEFAULT_HUB_SORT_CRITERIA,
+            registry=registry,
+        )
 
         return cls(
             hub_done_timeout_seconds=timeout,
@@ -126,26 +280,16 @@ class ConversationListConfig:
         return asdict(self)
 
     @staticmethod
-    def _parse_sort_criteria(raw_criteria: Any) -> list[dict[str, Any]]:
+    def _parse_sort_criteria(
+        raw_criteria: Any,
+        registry: SessionFilterAndSortRegistry | None = None,
+    ) -> list[dict[str, Any]]:
         """Parse and validate sort criteria from raw input."""
-        sort_criteria = []
-        if isinstance(raw_criteria, list):
-            valid_fields = {"status", "updated_at", "title"}
-            for item in raw_criteria:
-                if isinstance(item, dict) and item.get("field") in valid_fields:
-                    sort_criteria.append(
-                        {
-                            "field": item["field"],
-                            "ascending": bool(item.get("ascending", False)),
-                        }
-                    )
-        if not sort_criteria:
-            sort_criteria = [
-                {"field": "status", "ascending": False},
-                {"field": "updated_at", "ascending": False},
-                {"field": "title", "ascending": True},
-            ]
-        return sort_criteria
+        return _parse_sort_criteria_list(
+            raw_criteria,
+            DEFAULT_SORT_CRITERIA,
+            registry=registry,
+        )
 
     @staticmethod
     def _parse_clamped_int(value: Any, default: int, min_val: int, max_val: int) -> int:
@@ -161,13 +305,17 @@ class ConversationListConfig:
             return default
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> ConversationListConfig:
+    def from_dict(
+        cls,
+        data: dict[str, Any] | None,
+        registry: SessionFilterAndSortRegistry | None = None,
+    ) -> ConversationListConfig:
         """Create config from dictionary with safety validation and fallback."""
         if not data or not isinstance(data, dict):
             return cls()
 
         return cls(
-            sort_criteria=cls._parse_sort_criteria(data.get("sort_criteria")),
+            sort_criteria=cls._parse_sort_criteria(data.get("sort_criteria"), registry=registry),
             done_retention_minutes=cls._parse_clamped_int(
                 data.get("done_retention_minutes", 60), 60, -1, 525600
             ),
@@ -210,71 +358,22 @@ class ConversationListConfig:
             logger.error("Failed to save config to %s: %s", config_path, e)
 
 
-def parse_session_datetime(val: str | datetime | None) -> datetime | None:
-    """Parse session datetime string to UTC-aware datetime."""
-    if not val:
-        return None
-    if isinstance(val, datetime):
-        if val.tzinfo is None:
-            return val.replace(tzinfo=timezone.utc)
-        return val.astimezone(timezone.utc)
-
-    # First try ISO parse via _parse_db_datetime
-    dt = _parse_db_datetime(str(val))
-    if dt is not None:
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-
-    # Try standard fromisoformat
-    try:
-        dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-
-
 def is_session_visible(
     session: SessionInfo,
     config: ConversationListConfig,
     now: datetime | None = None,
+    registry: SessionFilterAndSortRegistry | None = None,
 ) -> bool:
     """Determine whether a session should be displayed based on configuration."""
     now_dt = now or datetime.now(timezone.utc)
     if now_dt.tzinfo is None:
         now_dt = now_dt.replace(tzinfo=timezone.utc)
 
-    # 1. Exclude inactive (unlocked) sessions if configured
-    if config.exclude_inactive_unlocked and not session.is_active_presence:
-        return False
-
-    # 2. Protection rules for active sessions
-    if config.protect_waiting_sessions and session.status == SessionStatus.WAITING_FOR_APPROVAL:
-        return True
-    if config.protect_working_sessions and session.status == SessionStatus.WORKING:
-        return True
-
-    session_dt = parse_session_datetime(session.updated_at)
-
-    # 3. DONE session retention
-    if session.status == SessionStatus.DONE:
-        # 0: Immediate drop
-        if config.done_retention_minutes == 0:
-            return False
-        # > 0: Drop if older than specified minutes
-        if config.done_retention_minutes > 0 and session_dt:
-            age_minutes = (now_dt - session_dt).total_seconds() / 60.0
-            if age_minutes > config.done_retention_minutes:
-                return False
-        # -1: Retain indefinitely (proceeds to inactivity check)
-
-    # 4. Inactivity threshold (max_inactivity_days)
-    if config.max_inactivity_days > 0 and session_dt:
-        age_days = (now_dt - session_dt).total_seconds() / 86400.0
-        if age_days > config.max_inactivity_days:
-            return False
+    active_registry = registry or DEFAULT_FILTER_SORT_REGISTRY
+    for rule in active_registry.get_filter_rules():
+        decision = rule.check_visibility(session, config, now_dt)
+        if decision is not None:
+            return decision
 
     return True
 
@@ -282,33 +381,21 @@ def is_session_visible(
 def sort_sessions(
     sessions: list[SessionInfo],
     criteria: list[dict[str, Any]],
+    registry: SessionFilterAndSortRegistry | None = None,
 ) -> list[SessionInfo]:
     """Sort sessions according to multi-level criteria."""
-
-    def status_score(status: SessionStatus) -> int:
-        if status == SessionStatus.WAITING_FOR_APPROVAL:
-            return 2
-        elif status == SessionStatus.WORKING:
-            return 1
-        return 0
+    active_registry = registry or DEFAULT_FILTER_SORT_REGISTRY
 
     def make_sort_tuple(s: SessionInfo) -> tuple[Any, ...]:
         keys = []
         for crit in criteria:
             field_name = crit.get("field")
-            asc = crit.get("ascending", False)
-
-            if field_name == "status":
-                val = status_score(s.status)
-                keys.append(val if asc else -val)
-            elif field_name == "updated_at":
-                dt = parse_session_datetime(s.updated_at)
-                ts = dt.timestamp() if dt else 0.0
-                keys.append(ts if asc else -ts)
-            elif field_name == "title":
-                t = (s.title or "").lower()
-                # For string descending sort in tuple: invert char ordinals or compare directly
-                keys.append(t if asc else [-ord(c) for c in t])
+            if not isinstance(field_name, str):
+                continue
+            extractor = active_registry.get_sort_extractor(field_name)
+            if extractor is not None:
+                asc = bool(crit.get("ascending", False))
+                keys.append(extractor(s, asc))
         return tuple(keys)
 
     return sorted(sessions, key=make_sort_tuple)
@@ -318,8 +405,12 @@ def filter_and_sort_sessions(
     sessions: list[SessionInfo],
     config: ConversationListConfig,
     now: datetime | None = None,
+    registry: SessionFilterAndSortRegistry | None = None,
 ) -> list[SessionInfo]:
     """Filter, sort, and slice sessions according to configuration."""
-    visible = [s for s in sessions if is_session_visible(s, config, now=now)]
-    sorted_sessions = sort_sessions(visible, config.sort_criteria)
+    active_registry = registry or DEFAULT_FILTER_SORT_REGISTRY
+    visible = [
+        s for s in sessions if is_session_visible(s, config, now=now, registry=active_registry)
+    ]
+    sorted_sessions = sort_sessions(visible, config.sort_criteria, registry=active_registry)
     return sorted_sessions[: config.max_tracked_sessions]
