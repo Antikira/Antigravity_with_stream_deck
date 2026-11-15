@@ -28,9 +28,13 @@ except ImportError:
 
 from src.antigravity_monitor.collector import DataCollector
 from src.antigravity_monitor.config import ConversationListConfig
+from src.antigravity_monitor.extensibility_contracts import (
+    KeySvgRendererRegistry,
+    WindowFocuserProtocol,
+)
 from src.antigravity_monitor.image_generator import (
-    generate_hub_rocket_svg,
     generate_key_svg,
+    render_key_svg,
     svg_to_data_uri,
 )
 from src.antigravity_monitor.session_page_manager import (
@@ -121,6 +125,9 @@ class StreamDeckBridge:
         info: dict[str, Any] | None = None,
         state_store: StateStore | None = None,
         collector: DataCollector | None = None,
+        window_focuser: WindowFocuserProtocol | None = None,
+        svg_renderer_registry: KeySvgRendererRegistry | None = None,
+        page_manager: SessionPageManager | None = None,
     ) -> None:
         self.port = port
         self.plugin_uuid = plugin_uuid
@@ -133,7 +140,15 @@ class StreamDeckBridge:
         # Shared StateStore and dedicated background collector
         self.state_store = state_store or StateStore(config=initial_config)
         self.collector = collector or DataCollector(state_store=self.state_store)
-        self.page_manager = SessionPageManager(state_store=self.state_store, config=initial_config)
+        self.page_manager = (
+            page_manager
+            if page_manager is not None
+            else SessionPageManager(state_store=self.state_store, config=initial_config)
+        )
+        self.window_focuser: WindowFocuserProtocol = (
+            window_focuser if window_focuser is not None else WindowFocusManager
+        )
+        self.svg_renderer_registry = svg_renderer_registry
 
         self.ws: Any = None
         # Track active contexts: context -> dict(action, coordinates, settings)
@@ -258,23 +273,7 @@ class StreamDeckBridge:
         if not force and self._rendered_key_cache.get(context) == cache_key:
             return
 
-        svg = generate_key_svg(
-            title=key_data.title,
-            subtitle=key_data.subtitle,
-            status_label=key_data.status,
-            bg_color=key_data.bg_color,
-            is_active=is_active,
-        )
-        if key_data.key_id == "summary_hub":
-            svg = generate_hub_rocket_svg(status=key_data.status)
-        else:
-            svg = generate_key_svg(
-                title=key_data.title,
-                subtitle=key_data.subtitle,
-                status_label=key_data.status,
-                bg_color=key_data.bg_color,
-                is_active=is_active,
-            )
+        svg = render_key_svg(key_data, self.svg_renderer_registry)
         data_uri = svg_to_data_uri(svg)
 
         set_image_payload = {
@@ -380,7 +379,7 @@ class StreamDeckBridge:
                 primary.title,
                 primary.conversation_id,
             )
-            WindowFocusManager.focus_session(
+            self.window_focuser.focus_session(
                 workspace_uris=primary.workspace_uris,
                 title=primary.title,
             )
@@ -413,7 +412,7 @@ class StreamDeckBridge:
                     session.title,
                     session.conversation_id,
                 )
-                WindowFocusManager.focus_session(
+                self.window_focuser.focus_session(
                     workspace_uris=session.workspace_uris,
                     title=session.title,
                 )
@@ -450,6 +449,17 @@ class StreamDeckBridge:
             self._handle_session_slot(suffix)
         elif "quota" in suffix:
             self._handle_quota(suffix)
+        elif self.page_manager.action_registry.resolve_handler(action) is not None:
+            result = self.page_manager.dispatch_key_action(
+                action_id=action,
+                col=col,
+                row=row,
+                settings=settings,
+                collector=self.collector,
+                window_focuser=self.window_focuser,
+            )
+            if result.get("page_changed") or result.get("refresh_ui"):
+                await self.update_all_keys(force=True)
 
 
 # --- Embedded Web Simulator Server ---
@@ -585,13 +595,8 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         target = next((k for k in keys if k.key_id == key_id), None)
 
         if target:
-            svg = generate_key_svg(
-                title=target.title,
-                subtitle=target.subtitle,
-                status_label=target.status,
-                bg_color=target.bg_color,
-                is_active=(target.status == "working"),
-            )
+            registry = self.bridge.svg_renderer_registry if self.bridge else None
+            svg = render_key_svg(target, registry)
         else:
             svg = generate_key_svg(title="Empty", bg_color="#222222")
 
@@ -607,8 +612,9 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         key_id = data.get("key_id", "")
         logger.info("Simulator key press: key_id=%s from %s", key_id, self.address_string())
         mgr = self.bridge.page_manager if self.bridge else SessionPageManager()
+        focuser = self.bridge.window_focuser if self.bridge else WindowFocusManager
 
-        action_result = {"status": "ok", "action": key_id}
+        action_result: dict[str, Any] = {"status": "ok", "action": key_id}
 
         if key_id == "page_prev":
             mgr.prev_page()
@@ -619,7 +625,7 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         elif key_id == "summary_hub":
             primary = mgr.get_primary_session()
             if primary:
-                focused = WindowFocusManager.focus_session(
+                focused = focuser.focus_session(
                     workspace_uris=primary.workspace_uris,
                     title=primary.title,
                 )
@@ -636,7 +642,7 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
                 slot_idx = int(slot_part)
                 session = mgr.get_session_by_slot(slot_idx)
                 if session:
-                    focused = WindowFocusManager.focus_session(
+                    focused = focuser.focus_session(
                         workspace_uris=session.workspace_uris,
                         title=session.title,
                     )
@@ -656,6 +662,25 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
             if self.bridge and self.bridge.collector:
                 logger.info("Simulator: Requesting quota refresh for key %s", key_id)
                 self.bridge.collector.request_quota_refresh()
+        else:
+            raw_col = data.get("column", 0)
+            raw_row = data.get("row", 0)
+            col = raw_col if isinstance(raw_col, int) and not isinstance(raw_col, bool) else 0
+            row = raw_row if isinstance(raw_row, int) and not isinstance(raw_row, bool) else 0
+            raw_settings = data.get("settings")
+            settings = raw_settings if isinstance(raw_settings, dict) else None
+            dispatched = mgr.dispatch_key_action(
+                action_id=key_id,
+                col=col,
+                row=row,
+                settings=settings,
+                collector=self.bridge.collector if self.bridge else None,
+                window_focuser=focuser,
+            )
+            if dispatched.get("status") != "unhandled":
+                action_result.update(dispatched)
+                if "action" not in dispatched:
+                    action_result["action"] = key_id
 
         body = json.dumps(action_result, ensure_ascii=False).encode("utf-8")
         self.send_response(200)

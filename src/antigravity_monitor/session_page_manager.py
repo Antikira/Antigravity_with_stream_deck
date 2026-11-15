@@ -32,6 +32,14 @@ from src.antigravity_monitor.config import (
     parse_session_datetime,
     sort_sessions,
 )
+from src.antigravity_monitor.extensibility_contracts import (
+    KeyActionContext,
+    KeyActionHandlerProtocol,
+    KeyActionRegistry,
+    QuotaSourceProtocol,
+    SessionSourceProtocol,
+    WindowFocuserProtocol,
+)
 from src.antigravity_monitor.quota_reader import QuotaInfo, QuotaReader
 from src.antigravity_monitor.session_detector import (
     SessionDetector,
@@ -39,6 +47,7 @@ from src.antigravity_monitor.session_detector import (
     SessionStatus,
 )
 from src.antigravity_monitor.state_store import StateStore
+from src.antigravity_monitor.window_focus import WindowFocusManager
 
 
 @dataclass
@@ -92,20 +101,38 @@ class SessionPageManager:
 
     def __init__(
         self,
-        session_detector: SessionDetector | None = None,
-        quota_reader: QuotaReader | None = None,
+        session_detector: SessionSourceProtocol | None = None,
+        quota_reader: QuotaSourceProtocol | None = None,
         state_store: StateStore | None = None,
         config: ConversationListConfig | None = None,
+        action_registry: KeyActionRegistry | None = None,
     ) -> None:
         self.state_store = state_store
-        self.detector = session_detector or SessionDetector()
-        self.quota_reader = quota_reader or QuotaReader()
+        self.detector: SessionSourceProtocol = (
+            session_detector if session_detector is not None else SessionDetector()
+        )
+        self.quota_reader: QuotaSourceProtocol = (
+            quota_reader if quota_reader is not None else QuotaReader()
+        )
         default_cfg = state_store.get_config() if state_store else ConversationListConfig()
         self.config = config or default_cfg
+        self.action_registry = (
+            action_registry
+            if action_registry is not None
+            else create_default_key_action_registry()
+        )
         self.current_page = 0
         self._tracked_session_ids: list[str] = []
         self._cached_sessions: dict[str, SessionInfo] = {}
         self._cached_quotas: dict[str, QuotaInfo] = {}
+
+    def register_key_handler(
+        self,
+        handler: KeyActionHandlerProtocol,
+        prepend: bool = True,
+    ) -> None:
+        """Register a custom key action handler on the action registry."""
+        self.action_registry.register(handler, prepend=prepend)
 
     # ------------------------------------------------------------------
     # Pagination
@@ -452,59 +479,38 @@ class SessionPageManager:
     ) -> KeyRenderData | None:
         """Get KeyRenderData directly by action identifier, suffix, or grid coordinates."""
         suffix = action_id.split(".")[-1]
+        context = KeyActionContext(
+            page_manager=self,
+            action_id=action_id,
+            suffix=suffix,
+            col=col,
+            row=row,
+            settings=settings or {},
+        )
+        return self.action_registry.build_key_data(context)
 
-        # 1. Hub
-        if suffix == "summary_hub":
-            return self.build_summary_hub_key_data(col=col, row=row, settings=settings)
-
-        # 2. Pagination
-        if suffix in ("prev_page", "page_prev", "prev_page_corner"):
-            return self.build_prev_page_key_data(col=col, row=row)
-        if suffix in ("next_page", "page_next", "next_page_corner"):
-            return self.build_next_page_key_data(col=col, row=row)
-
-        # 3. Session Slots (Specific slot UUID: session_slot_1..5 or session_slot_0..4)
-        if suffix.startswith("session_slot_"):
-            slot_part = suffix.replace("session_slot_", "")
-            if slot_part.isdigit():
-                num = int(slot_part)
-                # If 1-based (from UUID session_slot_1..5), map to 0..4
-                slot_idx = num - 1 if num in (1, 2, 3, 4, 5) else num
-                if 0 <= slot_idx < self.items_per_page:
-                    return self.build_session_slot_key_data(slot_idx, col=col, row=row)
-
-        # 4. Generic session slot: com.user.antigravity.session_slot
-        if suffix == "session_slot":
-            # Determine slot by settings or column index
-            if settings and "slot" in settings:
-                try:
-                    slot_idx = int(settings["slot"])
-                    if 0 <= slot_idx < self.items_per_page:
-                        return self.build_session_slot_key_data(slot_idx, col=col, row=row)
-                except Exception:
-                    pass
-            # Fallback: map by grid column (0..4)
-            slot_idx = min(max(0, col), self.items_per_page - 1)
-            return self.build_session_slot_key_data(slot_idx, col=col, row=row)
-
-        # 5. Quota keys by explicit key name
-        for qkey, _, _, fallback in self.QUOTA_DEFINITIONS:
-            if suffix in (f"quota_{qkey}", qkey):
-                return self.build_quota_key_data(qkey, col=col, row=row, fallback_label=fallback)
-
-        # 6. Legacy / Generic Quota keys (e.g. quota_5h, quota_daily, quota_weekly, or quota)
-        if "quota" in suffix:
-            quota_keys = ["gemini_5h", "gemini_weekly", "gpt_5h", "gpt_weekly"]
-            # Map by column if placed side-by-side (col 1..4 or 0..3)
-            q_idx = 0
-            if col in (1, 2, 3, 4):
-                q_idx = col - 1
-            elif col in (0, 1, 2, 3):
-                q_idx = col
-            target_qkey = quota_keys[min(q_idx, len(quota_keys) - 1)]
-            return self.build_quota_key_data(target_qkey, col=col, row=row)
-
-        return None
+    def dispatch_key_action(
+        self,
+        action_id: str,
+        col: int = 0,
+        row: int = 0,
+        settings: dict[str, Any] | None = None,
+        collector: Any | None = None,
+        window_focuser: WindowFocuserProtocol | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch a key press action through the registered key action handlers."""
+        suffix = action_id.split(".")[-1]
+        context = KeyActionContext(
+            page_manager=self,
+            collector=collector,
+            window_focuser=window_focuser,
+            action_id=action_id,
+            suffix=suffix,
+            col=col,
+            row=row,
+            settings=settings or {},
+        )
+        return self.action_registry.dispatch_press(context)
 
     def build_all_key_data(self) -> list[KeyRenderData]:
         """Generate render data for all 12 default buttons."""
@@ -526,3 +532,203 @@ class SessionPageManager:
             keys.append(self.build_session_slot_key_data(slot_idx, col=col, row=row))
 
         return keys
+
+
+class SummaryHubKeyHandler:
+    """Key action handler for the Summary Hub warning-light button."""
+
+    def matches(self, suffix: str) -> bool:
+        return suffix == "summary_hub"
+
+    def build_key_data(self, context: KeyActionContext) -> KeyRenderData | None:
+        return context.page_manager.build_summary_hub_key_data(
+            col=context.col,
+            row=context.row,
+            settings=context.settings,
+        )
+
+    def on_press(self, context: KeyActionContext) -> dict[str, Any]:
+        primary = context.page_manager.get_primary_session(settings=context.settings)
+        result: dict[str, Any] = {
+            "status": "ok",
+            "action": context.suffix or context.action_id,
+        }
+        if primary:
+            focuser = context.window_focuser or WindowFocusManager
+            focused = focuser.focus_session(
+                workspace_uris=primary.workspace_uris,
+                title=primary.title,
+            )
+            result["session"] = primary.title
+            result["conversation_id"] = primary.conversation_id
+            result["focused"] = focused
+        return result
+
+
+class PaginationKeyHandler:
+    """Key action handler for previous/next page navigation keys."""
+
+    _PREV_SUFFIXES = frozenset({"prev_page", "page_prev", "prev_page_corner"})
+    _NEXT_SUFFIXES = frozenset({"next_page", "page_next", "next_page_corner"})
+
+    def matches(self, suffix: str) -> bool:
+        return suffix in self._PREV_SUFFIXES or suffix in self._NEXT_SUFFIXES
+
+    def build_key_data(self, context: KeyActionContext) -> KeyRenderData | None:
+        if context.suffix in self._PREV_SUFFIXES:
+            return context.page_manager.build_prev_page_key_data(
+                col=context.col,
+                row=context.row,
+            )
+        if context.suffix in self._NEXT_SUFFIXES:
+            return context.page_manager.build_next_page_key_data(
+                col=context.col,
+                row=context.row,
+            )
+        return None
+
+    def on_press(self, context: KeyActionContext) -> dict[str, Any]:
+        action_name = context.suffix or context.action_id
+        if context.suffix in self._PREV_SUFFIXES:
+            changed = context.page_manager.prev_page()
+            return {
+                "status": "ok",
+                "action": action_name,
+                "page_changed": changed,
+                "current_page": context.page_manager.current_page,
+            }
+        if context.suffix in self._NEXT_SUFFIXES:
+            changed = context.page_manager.next_page()
+            return {
+                "status": "ok",
+                "action": action_name,
+                "page_changed": changed,
+                "current_page": context.page_manager.current_page,
+            }
+        return {"status": "unhandled", "action": action_name}
+
+
+class SessionSlotKeyHandler:
+    """Key action handler for numbered and generic session slot keys."""
+
+    def matches(self, suffix: str) -> bool:
+        return suffix.startswith("session_slot_") or suffix == "session_slot"
+
+    @staticmethod
+    def _resolve_slot_index(context: KeyActionContext) -> int | None:
+        suffix = context.suffix
+        items_per_page = context.page_manager.items_per_page
+
+        if suffix.startswith("session_slot_"):
+            slot_part = suffix.replace("session_slot_", "", 1)
+            if slot_part.isdigit():
+                num = int(slot_part)
+                # If 1-based (from UUID session_slot_1..5), map to 0..4
+                slot_idx = num - 1 if num in (1, 2, 3, 4, 5) else num
+                if 0 <= slot_idx < items_per_page:
+                    return slot_idx
+            return None
+
+        if suffix == "session_slot":
+            if context.settings and "slot" in context.settings:
+                try:
+                    slot_idx = int(context.settings["slot"])
+                    if 0 <= slot_idx < items_per_page:
+                        return slot_idx
+                except Exception:
+                    pass
+            return min(max(0, context.col), items_per_page - 1)
+
+        return None
+
+    def build_key_data(self, context: KeyActionContext) -> KeyRenderData | None:
+        slot_idx = self._resolve_slot_index(context)
+        if slot_idx is None:
+            return None
+        return context.page_manager.build_session_slot_key_data(
+            slot_idx,
+            col=context.col,
+            row=context.row,
+        )
+
+    def on_press(self, context: KeyActionContext) -> dict[str, Any]:
+        action_name = context.suffix or context.action_id
+        slot_idx = self._resolve_slot_index(context)
+        if slot_idx is None:
+            return {
+                "status": "error",
+                "action": action_name,
+                "info": "Invalid session slot ID",
+            }
+        session = context.page_manager.get_session_by_slot(slot_idx)
+        result: dict[str, Any] = {
+            "status": "ok",
+            "action": action_name,
+            "slot": slot_idx,
+        }
+        if session:
+            focuser = context.window_focuser or WindowFocusManager
+            focused = focuser.focus_session(
+                workspace_uris=session.workspace_uris,
+                title=session.title,
+            )
+            result["session"] = session.title
+            result["conversation_id"] = session.conversation_id
+            result["focused"] = focused
+        return result
+
+
+class QuotaKeyHandler:
+    """Key action handler for quota usage indicator keys."""
+
+    def matches(self, suffix: str) -> bool:
+        for qkey, _, _, _ in SessionPageManager.QUOTA_DEFINITIONS:
+            if suffix in (f"quota_{qkey}", qkey):
+                return True
+        return "quota" in suffix
+
+    def build_key_data(self, context: KeyActionContext) -> KeyRenderData | None:
+        suffix = context.suffix
+        mgr = context.page_manager
+        quota_defs = getattr(mgr, "QUOTA_DEFINITIONS", SessionPageManager.QUOTA_DEFINITIONS)
+        for qkey, _, _, fallback in quota_defs:
+            if suffix in (f"quota_{qkey}", qkey):
+                return mgr.build_quota_key_data(
+                    qkey,
+                    col=context.col,
+                    row=context.row,
+                    fallback_label=fallback,
+                )
+
+        if "quota" in suffix:
+            quota_keys = ["gemini_5h", "gemini_weekly", "gpt_5h", "gpt_weekly"]
+            # Map by column if placed side-by-side (col 1..4 or 0..3)
+            q_idx = 0
+            if context.col in (1, 2, 3, 4):
+                q_idx = context.col - 1
+            elif context.col in (0, 1, 2, 3):
+                q_idx = context.col
+            target_qkey = quota_keys[min(q_idx, len(quota_keys) - 1)]
+            return mgr.build_quota_key_data(target_qkey, col=context.col, row=context.row)
+
+        return None
+
+    def on_press(self, context: KeyActionContext) -> dict[str, Any]:
+        requested = context.collector is not None
+        if requested:
+            context.collector.request_quota_refresh()
+        return {
+            "status": "ok",
+            "action": context.suffix or context.action_id,
+            "quota_refresh_requested": requested,
+        }
+
+
+def create_default_key_action_registry() -> KeyActionRegistry:
+    """Create a KeyActionRegistry populated with the built-in Stream Deck key handlers."""
+    registry = KeyActionRegistry()
+    registry.register(SummaryHubKeyHandler())
+    registry.register(PaginationKeyHandler())
+    registry.register(SessionSlotKeyHandler())
+    registry.register(QuotaKeyHandler())
+    return registry

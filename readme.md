@@ -12,15 +12,21 @@ streamdeck_compornent/
 │   ├── profile_slot_copier/                # プロファイル・マス設定コピーツール
 │   └── antigravity_monitor/                
 │       ├── __init__.py
+│       ├── extensibility_contracts.py      # OCP/DIP 共有プロトコル・コンテキスト・レジストリ定義
 │       ├── session_detector.py             # セッション状態解析（起動時完了除外・作業中/承認待ち/完了）
+│       ├── config.py                       # 設定モデル・フィルタ/ソートレジストリ管理
+│       ├── collector.py                    # バックグラウンド収集ワーカー（Session/Quota ポーリング）
+│       ├── state_store.py                  # スレッドセーフな状態スナップショット管理
 │       ├── window_focus.py                 # Win32 APIによるウィンドウ最前面化
 │       ├── quota_reader.py                 # 5時間・日次・週間レートリミット集計
 │       ├── session_page_manager.py         # 3x5キー配置管理＆1ボタンハブ＆コーナーナビ
-│       ├── image_generator.py              # 動的SVGキー画像生成
+│       ├── image_generator.py              # 動的SVGキー画像生成・Hubテーマ/SVGレンダラーレジストリ
 │       ├── streamdeck_bridge.py            # Stream Deck WebSocket ＆ Webシミュレータ
 │       ├── installer.py                    # Stream Deckプラグイン導入・削除ツール
 │       ├── generate_icons.py               # 静的アイコン生成ツール
 │       └── simulator_ui.html               # Web版キーボードシミュレータ
+├── docs/                                    # 設計ドキュメント
+│   └── antigravity_monitor_extensibility_architecture.md  # OCP/DIP 拡張アーキテクチャ設計書
 ├── sdplugin/                                # Stream Deck公式プラグインパッケージ
 │   └── com.user.antigravity.sdPlugin/
 │       ├── manifest.json
@@ -28,7 +34,11 @@ streamdeck_compornent/
 │       └── Images/
 ├── tests/                                   # 自動テストスイート
 │   ├── test_slot_copier.py
-│   └── test_antigravity_monitor.py
+│   ├── test_antigravity_monitor.py
+│   ├── test_antigravity_extensibility.py
+│   ├── test_conversation_list_settings.py
+│   ├── test_hub_settings_separation.py
+│   └── test_streamdeck_bridge_main.py
 ├── data/                                    # バックアップやテンポラリデータ格納ディレクトリ
 ├── templates/                               # 共通マステンプレート定義
 ├── pyproject.toml
@@ -99,6 +109,21 @@ install_plugin.bat --uninstall
 uv run python -m src.antigravity_monitor.streamdeck_bridge --server
 ```
 ブラウザで [http://127.0.0.1:18500/](http://127.0.0.1:18500/) を開くと、1ボタン圧縮ハブおよび 3x5 キーボードのシミュレータが表示されます。クリックすると対応する VS Code ウィンドウが最前面化されます。
+
+---
+
+### 拡張アーキテクチャ（OCP / DIP）
+
+`src/antigravity_monitor/` は開放閉鎖の原則（OCP）および依存性逆転の原則（DIP）に基づいて設計されており、既存コアクラスを修正せずに以下の拡張ポイントから機能追加・差し替えが可能です。
+
+- **共有プロトコルとレジストリ（`extensibility_contracts.py`）**:
+  - 外部データ取得・操作の抽象化: `SessionSourceProtocol`, `QuotaSourceProtocol`, `WindowFocuserProtocol`
+  - セッション解析パイプライン: `SessionStatusRuleProtocol`, `TitleResolverRuleProtocol`（`SessionDetector.register_status_rule` / `register_title_resolver`）
+  - フィルタ・ソート拡張: `SessionFilterRuleProtocol`, `SessionFilterAndSortRegistry`（`DEFAULT_FILTER_SORT_REGISTRY`）
+  - UI / SVG テーマとレンダラー拡張: `HubStatusTheme`, `HubStatusThemeRegistry`, `KeySvgRendererRegistry`
+  - キーアクション拡張: `KeyActionHandlerProtocol`, `KeyActionRegistry`（`SessionPageManager.register_key_handler`）
+
+詳細な依存構造図・クラス図および具体的な拡張レシピは [docs/antigravity_monitor_extensibility_architecture.md](docs/antigravity_monitor_extensibility_architecture.md) を参照してください。
 
 ---
 

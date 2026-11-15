@@ -12,6 +12,10 @@ import queue
 import threading
 import time
 
+from src.antigravity_monitor.extensibility_contracts import (
+    QuotaSourceProtocol,
+    SessionSourceProtocol,
+)
 from src.antigravity_monitor.quota_reader import QuotaReader
 from src.antigravity_monitor.session_detector import SessionDetector
 from src.antigravity_monitor.state_store import StateStore
@@ -25,14 +29,18 @@ class DataCollector:
     def __init__(
         self,
         state_store: StateStore | None = None,
-        session_detector: SessionDetector | None = None,
-        quota_reader: QuotaReader | None = None,
+        session_detector: SessionSourceProtocol | None = None,
+        quota_reader: QuotaSourceProtocol | None = None,
         session_poll_interval: float = 1.0,
         quota_poll_interval: float = 120.0,
     ) -> None:
-        self.state_store = state_store or StateStore()
-        self.detector = session_detector or SessionDetector()
-        self.quota_reader = quota_reader or QuotaReader()
+        self.state_store = state_store if state_store is not None else StateStore()
+        self.detector: SessionSourceProtocol = (
+            session_detector if session_detector is not None else SessionDetector()
+        )
+        self.quota_reader: QuotaSourceProtocol = (
+            quota_reader if quota_reader is not None else QuotaReader()
+        )
         self.session_poll_interval = session_poll_interval
         self.quota_poll_interval = quota_poll_interval
 
