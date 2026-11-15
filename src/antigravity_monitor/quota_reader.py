@@ -72,7 +72,7 @@ class QuotaInfo:
 
     window_name: str  # "5H", "7D"
     label: str  # "5H", "週間"
-    model_group: str  # "Gemini" or "GPT/Claude"
+    model_group: str  # "Gemini", "GPT/Claude", or "Argon"
     remaining_percent: float
     used_tokens: int | None = None
     limit_tokens: int | None = None
@@ -93,8 +93,12 @@ class QuotaInfo:
     @property
     def key_title(self) -> str:
         """Formatted title for Stream Deck key."""
-        is_gpt = "GPT" in self.model_group or "Claude" in self.model_group
-        model_short = "GPT" if is_gpt else "Gemini"
+        if "Argon" in self.model_group:
+            model_short = "Argon"
+        elif "GPT" in self.model_group or "Claude" in self.model_group:
+            model_short = "GPT"
+        else:
+            model_short = "Gemini"
         line1 = f"{model_short} {self.label}"
         line2 = self.display_percent_str
 
@@ -251,9 +255,13 @@ class QuotaReader:
                 if reset_time:
                     reset_in_seconds = max(0, int((reset_time - now).total_seconds()))
 
-                is_gemini = "Gemini" in model_group_raw
+                is_argon = "Argon" in model_group_raw or "Argon" in limit_type
+                is_gemini = "Gemini" in model_group_raw and not is_argon
 
-                if is_gemini:
+                if is_argon:
+                    model_group = "Argon"
+                    prefix = "argon"
+                elif is_gemini:
                     model_group = "Gemini"
                     prefix = "gemini"
                 else:

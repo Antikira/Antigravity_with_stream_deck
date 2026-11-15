@@ -1,6 +1,6 @@
 """Key layout manager for Antigravity Stream Deck controller.
 
-Provides 12 Stream Deck buttons:
+Provides 13 Stream Deck buttons:
 1. Summary Hub (1 button):
    - Warning light showing highest-priority session status.
    - Color: WAITING (Red) > WORKING (Blue) > DONE (Green) > Idle (Dark Gray).
@@ -10,11 +10,12 @@ Provides 12 Stream Deck buttons:
    - Press to focus the corresponding session window.
 3. Pagination (2 buttons: Prev / Next):
    - Switches the active session page for Session 1-5 buttons.
-4. Quota Indicators (4 buttons):
+4. Quota Indicators (5 buttons):
    - Gemini 5-Hour Limit
    - Gemini Weekly Limit
    - Claude/GPT 5-Hour Limit
    - Claude/GPT Weekly Limit
+   - Argon Weekly Limit
    - Indicator only (no action on press).
 """
 
@@ -91,12 +92,13 @@ class SessionPageManager:
         "critical": "#C62828",  # Deep Red
     }
 
-    # Definition of the 4 quota buttons: (quota_key, default_col, default_row, fallback_label)
+    # Definition of the 5 quota buttons: (quota_key, default_col, default_row, fallback_label)
     QUOTA_DEFINITIONS = [
         ("gemini_5h", 0, 1, "Gemini 5H"),
         ("gemini_weekly", 1, 1, "Gemini 週間"),
         ("gpt_5h", 2, 1, "GPT 5H"),
         ("gpt_weekly", 3, 1, "GPT 週間"),
+        ("argon_weekly", 1, 2, "Argon 週間"),
     ]
 
     def __init__(
@@ -513,7 +515,7 @@ class SessionPageManager:
         return self.action_registry.dispatch_press(context)
 
     def build_all_key_data(self) -> list[KeyRenderData]:
-        """Generate render data for all 12 default buttons."""
+        """Generate render data for all 13 default buttons."""
         keys: list[KeyRenderData] = []
 
         # 1. Hub
@@ -699,6 +701,14 @@ class QuotaKeyHandler:
                     row=context.row,
                     fallback_label=fallback,
                 )
+
+        if suffix in ("quota_argon_5h", "argon_5h"):
+            return mgr.build_quota_key_data(
+                "argon_5h",
+                col=context.col,
+                row=context.row,
+                fallback_label="Argon 5H",
+            )
 
         if "quota" in suffix:
             quota_keys = ["gemini_5h", "gemini_weekly", "gpt_5h", "gpt_weekly"]

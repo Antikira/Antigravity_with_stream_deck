@@ -190,6 +190,20 @@
         }
       ],
       "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Argon Weekly Limit",
+      "UUID": "com.user.antigravity.quota_argon_weekly",
+      "Icon": "Images/quotaIcon",
+      "Tooltip": "Gemini 4 Argon weekly rate limit remaining indicator",
+      "States": [
+        {
+          "Image": "Images/quotaIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
     }
   ]
 }

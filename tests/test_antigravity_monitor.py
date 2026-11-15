@@ -53,6 +53,7 @@ MOCK_AGY_OUTPUT = (
     "Gemini Models\tFive Hour Limit Remaining\t25%\t2026-10-03T02:53:20Z\n"
     "Claude and GPT models\tWeekly Limit Remaining\t99%\t2026-10-10T01:27:25Z\n"
     "Claude and GPT models\tFive Hour Limit Remaining\t97%\t2026-10-03T06:27:25Z\n"
+    "Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t75%\t2026-10-08T12:00:00Z\n"
 )
 
 
@@ -240,6 +241,7 @@ def test_quota_reader(mock_antigravity_env: Path):
     assert "gemini_weekly" in stats
     assert "gpt_5h" in stats
     assert "gpt_weekly" in stats
+    assert "argon_weekly" in stats
     assert "daily" not in stats
 
     g5 = stats["gemini_5h"]
@@ -261,6 +263,12 @@ def test_quota_reader(mock_antigravity_env: Path):
     pw = stats["gpt_weekly"]
     assert pw.remaining_percent == 99.0
     assert pw.model_group == "GPT/Claude"
+
+    aw = stats["argon_weekly"]
+    assert aw.remaining_percent == 75.0
+    assert aw.model_group == "Argon"
+    assert aw.status_level == "normal"
+    assert "Argon 週間" in aw.key_title
 
 
 def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
@@ -349,11 +357,14 @@ def test_session_page_manager(mock_antigravity_env: Path):
     assert "session_slot_4" in key_ids
     assert "quota_gemini_5h" in key_ids
     assert "quota_gpt_5h" in key_ids
+    assert "quota_argon_weekly" in key_ids
     assert "summary_hub" in key_ids
 
-    # Verify hub position (0,2)
+    # Verify hub position (0,2) and argon_weekly position (1,2)
     hub_key = next(k for k in keys if k.key_id == "summary_hub")
     assert hub_key.column == 0 and hub_key.row == 2
+    argon_key = next(k for k in keys if k.key_id == "quota_argon_weekly")
+    assert argon_key.column == 1 and argon_key.row == 2
 
 
 def test_action_id_resolution(mock_antigravity_env: Path):
@@ -386,7 +397,7 @@ def test_action_id_resolution(mock_antigravity_env: Path):
     assert k_next is not None
     assert k_next.key_id == "page_next"
 
-    # 9-12. 4 Quota buttons
+    # 9-13. 5 Quota buttons
     k_g5 = mgr.get_key_data_by_action_id("com.user.antigravity.quota_gemini_5h")
     assert k_g5 is not None
     assert k_g5.key_id == "quota_gemini_5h"
@@ -402,6 +413,10 @@ def test_action_id_resolution(mock_antigravity_env: Path):
     k_pw = mgr.get_key_data_by_action_id("com.user.antigravity.quota_gpt_weekly")
     assert k_pw is not None
     assert k_pw.key_id == "quota_gpt_weekly"
+
+    k_aw = mgr.get_key_data_by_action_id("com.user.antigravity.quota_argon_weekly")
+    assert k_aw is not None
+    assert k_aw.key_id == "quota_argon_weekly"
 
 
 def test_summary_hub_key_priority(mock_antigravity_env: Path):
@@ -1024,7 +1039,7 @@ def test_data_collector_and_page_manager(mock_antigravity_env: Path):
         page_mgr.refresh()
         assert page_mgr.total_pages == 2
         keys = page_mgr.build_all_key_data()
-        assert len(keys) == 12
+        assert len(keys) == 13
 
         hub = next(k for k in keys if k.key_id == "summary_hub")
         assert hub.status == "waiting"

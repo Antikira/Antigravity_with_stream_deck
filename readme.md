@@ -65,7 +65,7 @@ streamdeck_compornent/
      - `[ 次頁 ▶ ]` (ページ送り)
      - 5つのセッションスロットを表示し、各スロットを押すと対応するセッションのウィンドウが最前面化されます。
   4. **レートリミット（クォータ）表示**:
-     - 5時間枠、週間（7日間）枠の消費量・枠消費率（%）を可視化。
+     - Gemini / Claude・GPT / Argon の 5時間枠・週間（7日間）枠の残量・消費率（%）を可視化。
   5. **設定ファイルによるカスタマイズ (`data/monitor_config.json`)**:
      - `hub_done_timeout_seconds`: 完了（DONE）から待機（READY）表示に戻るまでの時間（秒数）。
        - 0以上の正の数: 指定時間経過後に待機状態へ自動遷移します（デフォルト: `300` 秒）。
@@ -102,7 +102,7 @@ install_plugin.bat --uninstall
 - `Prev Page`: 前ページキー
 - `Next Page`: 次ページキー
 - `Session 1` 〜 `Session 5`: 各セッションスロット
-- `5-Hour Quota` / `Weekly Quota`: レートリミット
+- `Gemini 5-Hour Limit` / `Gemini Weekly Limit` / `Claude/GPT 5-Hour Limit` / `Claude/GPT Weekly Limit` / `Argon Weekly Limit`: レートリミット表示
 
 #### 2. ブラウザ版シミュレータでの動作確認
 ```bash
