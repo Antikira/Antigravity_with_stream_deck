@@ -8,6 +8,13 @@ from __future__ import annotations
 
 import html
 import urllib.parse
+from typing import Any
+
+from src.antigravity_monitor.extensibility_contracts import (
+    HubStatusTheme,
+    HubStatusThemeRegistry,
+    KeySvgRendererRegistry,
+)
 
 
 def generate_key_svg(
@@ -119,6 +126,7 @@ def _build_hub_svg(
     gradient_end: str,
     label: str,
     graphics: str,
+    border_opacity: str = "0.2",
 ) -> str:
     """Helper to build a consistent hub rocket SVG."""
     return (
@@ -131,7 +139,7 @@ def _build_hub_svg(
         "  </defs>\n"
         f'  <rect x="0" y="0" width="144" height="144" rx="20" fill="url(#{gradient_id})" />\n'
         '  <rect x="2" y="2" width="140" height="140" rx="18" fill="none" stroke="#FFFFFF" '
-        'stroke-width="1.5" opacity="0.2" />\n'
+        f'stroke-width="1.5" opacity="{border_opacity}" />\n'
         f"{graphics}\n"
         f"{_STATUS_BAR_RECT}"
         '  <text x="72" y="127" text-anchor="middle" fill="#FFFFFF" '
@@ -251,7 +259,61 @@ def _get_ready_graphics() -> str:
     )
 
 
-def generate_hub_rocket_svg(status: str = "empty") -> str:
+DEFAULT_HUB_THEME_REGISTRY = HubStatusThemeRegistry()
+for _hub_theme in (
+    HubStatusTheme(
+        status_key="working",
+        gradient_id="bgWorking",
+        gradient_start="#1565C0",
+        gradient_end="#0D47A1",
+        label="WORKING",
+        graphics_builder=_get_working_graphics,
+        border_opacity="0.2",
+    ),
+    HubStatusTheme(
+        status_key="done",
+        gradient_id="bgDone",
+        gradient_start="#2E7D32",
+        gradient_end="#1B5E20",
+        label="DONE",
+        graphics_builder=_get_done_graphics,
+        border_opacity="0.2",
+    ),
+    HubStatusTheme(
+        status_key="waiting",
+        gradient_id="bgWaiting",
+        gradient_start="#EF6C00",
+        gradient_end="#D84315",
+        label="WAITING",
+        graphics_builder=_get_waiting_graphics,
+        border_opacity="0.2",
+    ),
+    HubStatusTheme(
+        status_key="empty",
+        gradient_id="bgIdle",
+        gradient_start="#37474F",
+        gradient_end="#212121",
+        label="READY",
+        graphics_builder=_get_ready_graphics,
+        border_opacity="0.15",
+    ),
+    HubStatusTheme(
+        status_key="idle",
+        gradient_id="bgIdle",
+        gradient_start="#37474F",
+        gradient_end="#212121",
+        label="READY",
+        graphics_builder=_get_ready_graphics,
+        border_opacity="0.15",
+    ),
+):
+    DEFAULT_HUB_THEME_REGISTRY.register(_hub_theme)
+
+
+def generate_hub_rocket_svg(
+    status: str = "empty",
+    theme_registry: HubStatusThemeRegistry | None = None,
+) -> str:
     """Generate 144x144 SVG icon of Antigravity rocket mascot for Hub key.
 
     Supported status:
@@ -261,43 +323,53 @@ def generate_hub_rocket_svg(status: str = "empty") -> str:
       Label: WAITING.
     - 'empty' / 'idle': Upright on launchpad tower resting with zZ. Label: READY.
     """
-    normalized_status = status.lower().strip()
-
-    if normalized_status == "working":
-        return _build_hub_svg(
-            gradient_id="bgWorking",
-            gradient_start="#1565C0",
-            gradient_end="#0D47A1",
-            label="WORKING",
-            graphics=_get_working_graphics(),
-        )
-
-    if normalized_status == "done":
-        return _build_hub_svg(
-            gradient_id="bgDone",
-            gradient_start="#2E7D32",
-            gradient_end="#1B5E20",
-            label="DONE",
-            graphics=_get_done_graphics(),
-        )
-
-    if normalized_status == "waiting":
-        return _build_hub_svg(
-            gradient_id="bgWaiting",
-            gradient_start="#EF6C00",
-            gradient_end="#D84315",
-            label="WAITING",
-            graphics=_get_waiting_graphics(),
-        )
-
-    # Default / Idle / Empty
+    registry = (
+        theme_registry if theme_registry is not None else DEFAULT_HUB_THEME_REGISTRY
+    )
+    theme = registry.get(status)
     return _build_hub_svg(
-        gradient_id="bgIdle",
-        gradient_start="#37474F",
-        gradient_end="#212121",
-        label="READY",
-        graphics=_get_ready_graphics(),
-    ).replace('opacity="0.2"', 'opacity="0.15"')
+        gradient_id=theme.gradient_id,
+        gradient_start=theme.gradient_start,
+        gradient_end=theme.gradient_end,
+        label=theme.label,
+        graphics=theme.graphics_builder(),
+        border_opacity=theme.border_opacity,
+    )
+
+
+def _render_default_key_svg(key_data: Any) -> str:
+    """Default key SVG renderer delegating to generate_key_svg."""
+    status = getattr(key_data, "status", "default")
+    return generate_key_svg(
+        title=getattr(key_data, "title", ""),
+        subtitle=getattr(key_data, "subtitle", ""),
+        status_label=status,
+        bg_color=getattr(key_data, "bg_color", "#222222"),
+        is_active=(status == "working"),
+    )
+
+
+def _render_summary_hub_key_svg(key_data: Any) -> str:
+    """Summary Hub key SVG renderer delegating to generate_hub_rocket_svg."""
+    return generate_hub_rocket_svg(status=getattr(key_data, "status", "empty"))
+
+
+DEFAULT_KEY_SVG_RENDERER_REGISTRY = KeySvgRendererRegistry()
+DEFAULT_KEY_SVG_RENDERER_REGISTRY.set_default_renderer(_render_default_key_svg)
+DEFAULT_KEY_SVG_RENDERER_REGISTRY.register("summary_hub", _render_summary_hub_key_svg)
+
+
+def render_key_svg(
+    key_data: Any,
+    renderer_registry: KeySvgRendererRegistry | None = None,
+) -> str:
+    """Render SVG markup for key_data using renderer_registry or the default registry."""
+    registry = (
+        renderer_registry
+        if renderer_registry is not None
+        else DEFAULT_KEY_SVG_RENDERER_REGISTRY
+    )
+    return registry.render(key_data)
 
 
 def svg_to_data_uri(svg: str) -> str:
