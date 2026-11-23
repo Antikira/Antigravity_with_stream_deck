@@ -341,7 +341,11 @@
           body: JSON.stringify({ key_id: keyId }),
         });
         const pressData = await pressRes.json();
-        if (pressData.session) {
+        if (pressData.mode === "sleep") {
+          showToast("スリープモード（監視停止）");
+        } else if (pressData.mode === "tracking") {
+          showToast("追跡モード（監視再開）");
+        } else if (pressData.session) {
           showToast(`🎯 最前面フォーカス: ${pressData.session}`);
         } else if (pressData.info) {
           showToast(`ℹ️ ${pressData.info}`);

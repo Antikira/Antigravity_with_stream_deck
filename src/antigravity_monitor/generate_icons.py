@@ -61,6 +61,7 @@ def generate_all_icons(target_dir: Path) -> None:
     create_icon(target_dir / "quotaIcon.png", "#E65100", "%", "Quota")
     create_icon(target_dir / "hubIcon.png", "#1E88E5", "HUB", "Antigravity")
     create_icon(target_dir / "backIcon.png", "#455A64", "TOP", "Parent")
+    create_icon(target_dir / "toggleIcon.png", "#455A64", "ZZZ", "Mode")
 
 
 if __name__ == "__main__":
