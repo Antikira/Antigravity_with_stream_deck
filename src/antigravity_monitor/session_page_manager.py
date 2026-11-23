@@ -1,6 +1,6 @@
 """Key layout manager for Antigravity Stream Deck controller.
 
-Provides 13 Stream Deck buttons:
+Provides 14 Stream Deck buttons:
 1. Summary Hub (1 button):
    - Warning light showing highest-priority session status.
    - Color: WAITING (Red) > WORKING (Blue) > DONE (Green) > Idle (Dark Gray).
@@ -16,7 +16,10 @@ Provides 13 Stream Deck buttons:
    - Claude/GPT 5-Hour Limit
    - Claude/GPT Weekly Limit
    - Argon Weekly Limit
-   - Indicator only (no action on press).
+   - Press to request background quota refresh.
+5. Monitor Mode Toggle (1 button):
+   - Switches between Tracking mode (ACTIVE) and Sleep mode (SLEEP) to pause
+     or resume all background polling and CLI checks.
 """
 
 from __future__ import annotations
@@ -124,9 +127,25 @@ class SessionPageManager:
             else create_default_key_action_registry()
         )
         self.current_page = 0
+        self._is_sleeping = state_store.is_sleeping() if state_store is not None else False
         self._tracked_session_ids: list[str] = []
         self._cached_sessions: dict[str, SessionInfo] = {}
         self._cached_quotas: dict[str, QuotaInfo] = {}
+
+    @property
+    def is_sleeping(self) -> bool:
+        """Return whether monitoring is currently paused in sleep mode."""
+        if self.state_store is not None:
+            return self.state_store.is_sleeping()
+        return self._is_sleeping
+
+    def set_sleeping(self, sleeping: bool) -> bool:
+        """Update sleep mode state and return the resulting boolean state."""
+        target = bool(sleeping)
+        self._is_sleeping = target
+        if self.state_store is not None:
+            self.state_store.set_sleeping(target)
+        return target
 
     def register_key_handler(
         self,
@@ -178,10 +197,11 @@ class SessionPageManager:
         """Fetch fresh session and quota states from StateStore or detector."""
         if self.state_store is not None:
             snapshot = self.state_store.get_snapshot()
+            self._is_sleeping = snapshot.is_sleeping
             self._tracked_session_ids = snapshot.tracked_session_ids
             self._cached_sessions = snapshot.session_map
             self._cached_quotas = snapshot.quotas
-        else:
+        elif not self._is_sleeping:
             fresh_sessions = self.detector.list_sessions(
                 limit=50,
                 only_main_conversations=True,
@@ -329,6 +349,19 @@ class SessionPageManager:
         settings: dict[str, Any] | None = None,
     ) -> KeyRenderData:
         """Build the 1-button Hub warning light key using per-key instance settings."""
+        if self.is_sleeping:
+            return KeyRenderData(
+                key_id="summary_hub",
+                column=col,
+                row=row,
+                title="Antigravity\n(スリープ中)",
+                subtitle="SLEEP",
+                status="sleep",
+                bg_color="#455A64",
+                text_color="#FFFFFF",
+                payload={"action": "sleep_inactive"},
+            )
+
         hub_cfg = HubConfig.from_settings(settings)
         all_sessions = [
             self._cached_sessions[cid]
@@ -472,6 +505,37 @@ class SessionPageManager:
             payload={"quota_type": qkey},
         )
 
+    def build_monitor_toggle_key_data(
+        self,
+        col: int = 2,
+        row: int = 2,
+    ) -> KeyRenderData:
+        """Build render data for the Tracking / Sleep mode toggle key."""
+        sleeping = self.is_sleeping
+        if sleeping:
+            return KeyRenderData(
+                key_id="monitor_toggle",
+                column=col,
+                row=row,
+                title="監視モード\nスリープ",
+                subtitle="SLEEP",
+                status="SLEEP",
+                bg_color="#455A64",
+                text_color="#FFFFFF",
+                payload={"action": "toggle_sleep", "is_sleeping": True},
+            )
+        return KeyRenderData(
+            key_id="monitor_toggle",
+            column=col,
+            row=row,
+            title="監視モード\n追跡中",
+            subtitle="ACTIVE",
+            status="ACTIVE",
+            bg_color="#2E7D32",
+            text_color="#FFFFFF",
+            payload={"action": "toggle_sleep", "is_sleeping": False},
+        )
+
     def get_key_data_by_action_id(
         self,
         action_id: str,
@@ -515,7 +579,7 @@ class SessionPageManager:
         return self.action_registry.dispatch_press(context)
 
     def build_all_key_data(self) -> list[KeyRenderData]:
-        """Generate render data for all 13 default buttons."""
+        """Generate render data for all 14 default buttons."""
         keys: list[KeyRenderData] = []
 
         # 1. Hub
@@ -525,13 +589,16 @@ class SessionPageManager:
         keys.append(self.build_prev_page_key_data(col=0, row=0))
         keys.append(self.build_next_page_key_data(col=4, row=0))
 
-        # 3. Quota Keys (Row 1: col 0..3)
+        # 3. Quota Keys (Row 1: col 0..3, Row 2: col 1)
         for qkey, col, row, fallback in self.QUOTA_DEFINITIONS:
             keys.append(self.build_quota_key_data(qkey, col=col, row=row, fallback_label=fallback))
 
         # 4. Session Slots 1..5
         for slot_idx, (col, row) in enumerate(self.SLOT_COORDS):
             keys.append(self.build_session_slot_key_data(slot_idx, col=col, row=row))
+
+        # 5. Monitor Mode Toggle (Tracking / Sleep)
+        keys.append(self.build_monitor_toggle_key_data(col=2, row=2))
 
         return keys
 
@@ -734,6 +801,37 @@ class QuotaKeyHandler:
         }
 
 
+class MonitorToggleKeyHandler:
+    """Key action handler for toggling between tracking mode and sleep mode."""
+
+    _SUFFIXES = frozenset({"monitor_toggle", "sleep_toggle"})
+
+    def matches(self, suffix: str) -> bool:
+        return suffix in self._SUFFIXES
+
+    def build_key_data(self, context: KeyActionContext) -> KeyRenderData | None:
+        return context.page_manager.build_monitor_toggle_key_data(
+            col=context.col,
+            row=context.row,
+        )
+
+    def on_press(self, context: KeyActionContext) -> dict[str, Any]:
+        if context.collector is not None and hasattr(context.collector, "toggle_sleeping"):
+            is_sleeping = bool(context.collector.toggle_sleeping())
+            context.page_manager.set_sleeping(is_sleeping)
+        else:
+            is_sleeping = context.page_manager.set_sleeping(
+                not context.page_manager.is_sleeping
+            )
+        return {
+            "status": "ok",
+            "action": context.suffix or context.action_id,
+            "is_sleeping": is_sleeping,
+            "mode": "sleep" if is_sleeping else "tracking",
+            "refresh_ui": True,
+        }
+
+
 def create_default_key_action_registry() -> KeyActionRegistry:
     """Create a KeyActionRegistry populated with the built-in Stream Deck key handlers."""
     registry = KeyActionRegistry()
@@ -741,4 +839,5 @@ def create_default_key_action_registry() -> KeyActionRegistry:
     registry.register(PaginationKeyHandler())
     registry.register(SessionSlotKeyHandler())
     registry.register(QuotaKeyHandler())
+    registry.register(MonitorToggleKeyHandler())
     return registry

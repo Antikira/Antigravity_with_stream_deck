@@ -271,7 +271,14 @@ def test_quota_reader(mock_antigravity_env: Path):
     assert "Argon 週間" in aw.key_title
 
 
-def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
+def test_quota_reader_windows_creationflags(
+    mock_antigravity_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import os
+
+    monkeypatch.delenv("AGY_CLI_DISABLE_AUTO_UPDATE", raising=False)
+
     class FakeResult:
         stdout = MOCK_AGY_OUTPUT
         stderr = ""
@@ -286,6 +293,9 @@ def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
             assert mock_run.called
             _, kwargs = mock_run.call_args
             assert kwargs.get("stdin") == subprocess.DEVNULL
+            assert kwargs.get("env") is not None
+            assert kwargs["env"].get("AGY_CLI_DISABLE_AUTO_UPDATE") == "1"
+            assert "AGY_CLI_DISABLE_AUTO_UPDATE" not in os.environ
             assert kwargs.get("creationflags") == getattr(
                 subprocess, "CREATE_NO_WINDOW", 0x08000000
             )
@@ -304,6 +314,9 @@ def test_quota_reader_windows_creationflags(mock_antigravity_env: Path):
             assert mock_run.called
             _, kwargs = mock_run.call_args
             assert kwargs.get("stdin") == subprocess.DEVNULL
+            assert kwargs.get("env") is not None
+            assert kwargs["env"].get("AGY_CLI_DISABLE_AUTO_UPDATE") == "1"
+            assert "AGY_CLI_DISABLE_AUTO_UPDATE" not in os.environ
             assert "creationflags" not in kwargs
 
 
@@ -359,12 +372,15 @@ def test_session_page_manager(mock_antigravity_env: Path):
     assert "quota_gpt_5h" in key_ids
     assert "quota_argon_weekly" in key_ids
     assert "summary_hub" in key_ids
+    assert "monitor_toggle" in key_ids
 
-    # Verify hub position (0,2) and argon_weekly position (1,2)
+    # Verify hub position (0,2), argon_weekly position (1,2), and monitor_toggle position (2,2)
     hub_key = next(k for k in keys if k.key_id == "summary_hub")
     assert hub_key.column == 0 and hub_key.row == 2
     argon_key = next(k for k in keys if k.key_id == "quota_argon_weekly")
     assert argon_key.column == 1 and argon_key.row == 2
+    toggle_key = next(k for k in keys if k.key_id == "monitor_toggle")
+    assert toggle_key.column == 2 and toggle_key.row == 2
 
 
 def test_action_id_resolution(mock_antigravity_env: Path):
@@ -418,6 +434,11 @@ def test_action_id_resolution(mock_antigravity_env: Path):
     assert k_aw is not None
     assert k_aw.key_id == "quota_argon_weekly"
 
+    # 14. Monitor Mode Toggle
+    k_toggle = mgr.get_key_data_by_action_id("com.user.antigravity.monitor_toggle")
+    assert k_toggle is not None
+    assert k_toggle.key_id == "monitor_toggle"
+
 
 def test_summary_hub_key_priority(mock_antigravity_env: Path):
     with _mock_subprocess_empty():
@@ -469,13 +490,14 @@ def test_image_generator():
 
 
 def test_hub_rocket_svg_generator():
-    # Test all 4 states
+    # Test all 5 states (plus idle alias)
     for status, expected_label in [
         ("working", "WORKING"),
         ("done", "DONE"),
         ("waiting", "WAITING"),
         ("empty", "READY"),
         ("idle", "READY"),
+        ("sleep", "SLEEP"),
     ]:
         svg = generate_hub_rocket_svg(status)
         assert "<svg" in svg
@@ -1039,7 +1061,7 @@ def test_data_collector_and_page_manager(mock_antigravity_env: Path):
         page_mgr.refresh()
         assert page_mgr.total_pages == 2
         keys = page_mgr.build_all_key_data()
-        assert len(keys) == 13
+        assert len(keys) == 14
 
         hub = next(k for k in keys if k.key_id == "summary_hub")
         assert hub.status == "waiting"
@@ -1613,3 +1635,165 @@ def test_replace_executable_stops_locked_launcher_on_permission_error(
     assert attempts == 2
     assert stopped_names == ["antigravity_launcher.exe"]
     assert dest_exe.read_bytes() == b"MZ-new"
+
+
+def test_data_collector_sleep_mode_pauses_polling_and_resumes(tmp_path: Path) -> None:
+    import time
+    from unittest.mock import MagicMock
+
+    from src.antigravity_monitor.collector import DataCollector
+    from src.antigravity_monitor.state_store import StateStore
+
+    store = StateStore()
+    detector = MagicMock()
+    detector.list_sessions.return_value = []
+    quota_reader = MagicMock()
+    quota_reader.get_quota_stats.return_value = {}
+
+    collector = DataCollector(
+        state_store=store,
+        session_detector=detector,
+        quota_reader=quota_reader,
+        session_poll_interval=0.02,
+        quota_poll_interval=0.05,
+    )
+
+    collector.start()
+    try:
+        # Confirm initial polling runs while tracking
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if (
+                detector.list_sessions.call_count > 0
+                and quota_reader.get_quota_stats.call_count > 0
+            ):
+                break
+            time.sleep(0.01)
+        assert detector.list_sessions.call_count > 0
+        assert quota_reader.get_quota_stats.call_count > 0
+
+        # Enter sleep mode and verify polling + manual quota refresh are completely paused
+        assert collector.set_sleeping(True) is True
+        assert collector.is_sleeping is True
+        assert store.is_sleeping() is True
+
+        # Allow any in-flight poll iteration to finish before resetting counters
+        time.sleep(0.05)
+        detector.list_sessions.reset_mock()
+        quota_reader.get_quota_stats.reset_mock()
+
+        collector.request_quota_refresh()
+        time.sleep(0.15)
+        assert detector.list_sessions.call_count == 0
+        assert quota_reader.get_quota_stats.call_count == 0
+
+        # Resume tracking mode and confirm polling resumes
+        assert collector.set_sleeping(False) is False
+        assert collector.is_sleeping is False
+        assert store.is_sleeping() is False
+
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if detector.list_sessions.call_count > 0:
+                break
+            time.sleep(0.01)
+        assert detector.list_sessions.call_count > 0
+
+        # Re-enter sleep mode before stop() to verify sleeping threads terminate cleanly
+        assert collector.set_sleeping(True) is True
+        time.sleep(0.05)
+    finally:
+        collector.stop()
+
+
+def test_monitor_toggle_key_updates_bridge_hub_and_collector() -> None:
+    import asyncio
+    import urllib.parse
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.antigravity_monitor.collector import DataCollector
+    from src.antigravity_monitor.state_store import StateStore
+    from src.antigravity_monitor.streamdeck_bridge import StreamDeckBridge
+
+    async def _run() -> None:
+        store = StateStore()
+        detector = MagicMock()
+        detector.list_sessions.return_value = []
+        quota_reader = MagicMock()
+        quota_reader.get_quota_stats.return_value = {}
+        collector = DataCollector(
+            state_store=store,
+            session_detector=detector,
+            quota_reader=quota_reader,
+        )
+        focuser = MagicMock()
+
+        bridge = StreamDeckBridge(
+            port=1234,
+            plugin_uuid="uuid-toggle",
+            register_event="registerPlugin",
+            state_store=store,
+            collector=collector,
+            window_focuser=focuser,
+        )
+        bridge.ws = AsyncMock()
+        bridge.active_contexts["ctx_hub"] = {
+            "action": "com.user.antigravity.summary_hub",
+            "coordinates": {"column": 0, "row": 2},
+            "settings": {},
+        }
+        bridge.active_contexts["ctx_toggle"] = {
+            "action": "com.user.antigravity.monitor_toggle",
+            "coordinates": {"column": 2, "row": 2},
+            "settings": {},
+        }
+
+        # 1. Press monitor_toggle -> enters sleep mode
+        await bridge.handle_key_down(
+            context="ctx_toggle",
+            action="com.user.antigravity.monitor_toggle",
+            coords={"column": 2, "row": 2},
+            settings={},
+        )
+        assert collector.is_sleeping is True
+        assert store.is_sleeping() is True
+        assert bridge.page_manager.is_sleeping is True
+
+        hub_data = bridge.page_manager.build_summary_hub_key_data()
+        assert hub_data.status == "sleep"
+        assert hub_data.subtitle == "SLEEP"
+
+        toggle_sleep = bridge.page_manager.build_monitor_toggle_key_data()
+        assert toggle_sleep.status == "SLEEP"
+        assert toggle_sleep.subtitle == "SLEEP"
+
+        sent_svgs = [
+            urllib.parse.unquote(json.loads(call.args[0])["payload"]["image"])
+            for call in bridge.ws.send.call_args_list
+            if json.loads(call.args[0]).get("event") == "setImage"
+        ]
+        assert any("SLEEP" in svg for svg in sent_svgs)
+
+        # Hub press while sleeping must not focus any window
+        await bridge.handle_key_down(
+            context="ctx_hub",
+            action="com.user.antigravity.summary_hub",
+            coords={"column": 0, "row": 2},
+            settings={},
+        )
+        focuser.focus_session.assert_not_called()
+
+        # 2. Press monitor_toggle again -> returns to tracking mode
+        await bridge.handle_key_down(
+            context="ctx_toggle",
+            action="com.user.antigravity.monitor_toggle",
+            coords={"column": 2, "row": 2},
+            settings={},
+        )
+        assert collector.is_sleeping is False
+        assert store.is_sleeping() is False
+        toggle_active = bridge.page_manager.build_monitor_toggle_key_data()
+        assert toggle_active.status == "ACTIVE"
+        assert toggle_active.subtitle == "ACTIVE"
+
+    asyncio.run(_run())

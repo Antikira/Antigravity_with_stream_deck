@@ -204,6 +204,20 @@
         }
       ],
       "Controllers": ["Keypad"]
+    },
+    {
+      "Name": "Monitor Mode (Tracking / Sleep)",
+      "UUID": "com.user.antigravity.monitor_toggle",
+      "Icon": "Images/toggleIcon",
+      "Tooltip": "Toggle between Tracking mode and Sleep mode to pause or resume background monitoring and CLI polling",
+      "States": [
+        {
+          "Image": "Images/toggleIcon",
+          "TitleAlignment": "middle",
+          "FontSize": "11"
+        }
+      ],
+      "Controllers": ["Keypad"]
     }
   ]
 }

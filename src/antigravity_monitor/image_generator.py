@@ -259,6 +259,32 @@ def _get_ready_graphics() -> str:
     )
 
 
+def _get_sleep_graphics() -> str:
+    return (
+        '  <path d="M36 22 A13 13 0 1 0 50 38 A10 10 0 1 1 36 22 Z" '
+        'fill="#FFFFFF" opacity="0.85" />\n'
+        '  <text x="95" y="42" fill="#FFFFFF" font-family="Segoe UI, sans-serif" '
+        'font-weight="bold" font-size="11" opacity="0.65">z</text>\n'
+        '  <text x="103" y="31" fill="#FFFFFF" font-family="Segoe UI, sans-serif" '
+        'font-weight="bold" font-size="13" opacity="0.8">Z</text>\n'
+        '  <text x="113" y="21" fill="#FFFFFF" font-family="Segoe UI, sans-serif" '
+        'font-weight="bold" font-size="15" opacity="0.9">Z</text>\n'
+        '  <rect x="28" y="92" width="88" height="5" rx="2.5" fill="#FFFFFF" opacity="0.35" />\n'
+        '  <g transform="translate(72, 62)" opacity="0.9">\n'
+        '    <path d="M-14 10 L-20 22 L-12 22 Z" fill="#FFFFFF" stroke="#FFFFFF" '
+        'stroke-width="2" stroke-linejoin="round" />\n'
+        '    <path d="M14 10 L20 22 L12 22 Z" fill="#FFFFFF" stroke="#FFFFFF" '
+        'stroke-width="2" stroke-linejoin="round" />\n'
+        '    <path d="M-14 4 C-14 -20 0 -34 0 -34 C0 -34 14 -20 14 4 L14 22 L-14 22 Z" '
+        'fill="#FFFFFF" />\n'
+        '    <rect x="-8" y="22" width="16" height="4" rx="2" fill="#263238" />\n'
+        '    <circle cx="0" cy="-6" r="8.5" fill="#212121" />\n'
+        '    <path d="M-4 -6 Q0 -3 4 -6" fill="none" stroke="#FFFFFF" '
+        'stroke-width="2" stroke-linecap="round" opacity="0.85" />\n'
+        "  </g>"
+    )
+
+
 DEFAULT_HUB_THEME_REGISTRY = HubStatusThemeRegistry()
 for _hub_theme in (
     HubStatusTheme(
@@ -306,6 +332,15 @@ for _hub_theme in (
         graphics_builder=_get_ready_graphics,
         border_opacity="0.15",
     ),
+    HubStatusTheme(
+        status_key="sleep",
+        gradient_id="bgSleep",
+        gradient_start="#455A64",
+        gradient_end="#263238",
+        label="SLEEP",
+        graphics_builder=_get_sleep_graphics,
+        border_opacity="0.15",
+    ),
 ):
     DEFAULT_HUB_THEME_REGISTRY.register(_hub_theme)
 
@@ -322,6 +357,7 @@ def generate_hub_rocket_svg(
     - 'waiting': Crashed head-first into ground with warning exclamation, smoke, and sweat.
       Label: WAITING.
     - 'empty' / 'idle': Upright on launchpad tower resting with zZ. Label: READY.
+    - 'sleep': Resting with crescent moon and zZZ while paused. Label: SLEEP.
     """
     registry = (
         theme_registry if theme_registry is not None else DEFAULT_HUB_THEME_REGISTRY

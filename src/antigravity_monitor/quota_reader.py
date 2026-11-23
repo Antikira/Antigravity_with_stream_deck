@@ -218,6 +218,10 @@ class QuotaReader:
                     kwargs["startupinfo"] = startupinfo
 
             agy_executable = shutil.which("agy") or "agy"
+            # Suppress agy CLI's detached background auto-updater (--bg-updater),
+            # which otherwise spawns WindowsTerminal.exe and steals foreground focus.
+            env = os.environ.copy()
+            env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "1"
             result = subprocess.run(
                 [agy_executable, "-p", "/usage"],
                 capture_output=True,
@@ -225,6 +229,7 @@ class QuotaReader:
                 check=True,
                 timeout=15.0,
                 stdin=subprocess.DEVNULL,
+                env=env,
                 **kwargs,
             )
             return result.stdout

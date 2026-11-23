@@ -33,6 +33,7 @@ class MonitorSnapshot:
     version: int = 0
     updated_at: float = field(default_factory=time.time)
     config: ConversationListConfig = field(default_factory=ConversationListConfig)
+    is_sleeping: bool = False
 
 
 class StateStore:
@@ -47,7 +48,45 @@ class StateStore:
         self._cached_quotas: dict[str, QuotaInfo] = {}
         self._version: int = 0
         self._last_updated: float = 0.0
+        self._is_sleeping: bool = False
         self._listeners: list[Callable[[MonitorSnapshot], None]] = []
+
+    def is_sleeping(self) -> bool:
+        """Return whether monitoring is currently in sleep mode."""
+        with self._lock:
+            return self._is_sleeping
+
+    def set_sleeping(self, sleeping: bool) -> bool:
+        """Set sleep mode state atomically and notify listeners if changed.
+
+        Returns True if the state changed.
+        """
+        target = bool(sleeping)
+        listeners: list[Callable[[MonitorSnapshot], None]] = []
+        with self._lock:
+            if self._is_sleeping == target:
+                return False
+            self._is_sleeping = target
+            self._version += 1
+            self._last_updated = time.time()
+            snapshot = self._build_snapshot_locked()
+            listeners = list(self._listeners)
+
+        self._notify_listeners(listeners, snapshot)
+        return True
+
+    def toggle_sleeping(self) -> bool:
+        """Toggle sleep mode atomically, notify listeners, and return new state."""
+        with self._lock:
+            self._is_sleeping = not self._is_sleeping
+            new_state = self._is_sleeping
+            self._version += 1
+            self._last_updated = time.time()
+            snapshot = self._build_snapshot_locked()
+            listeners = list(self._listeners)
+
+        self._notify_listeners(listeners, snapshot)
+        return new_state
 
     def get_config(self) -> ConversationListConfig:
         """Return the current configuration."""
@@ -173,4 +212,5 @@ class StateStore:
             version=self._version,
             updated_at=self._last_updated,
             config=self._config,
+            is_sleeping=self._is_sleeping,
         )

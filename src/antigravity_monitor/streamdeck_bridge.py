@@ -372,6 +372,9 @@ class StreamDeckBridge:
 
     def _handle_summary_hub(self, settings: dict[str, Any]) -> None:
         """Handle summary hub key press."""
+        if self.page_manager.is_sleeping:
+            logger.info("Hub clicked while in sleep mode: ignoring window focus.")
+            return
         primary = self.page_manager.get_primary_session(settings=settings)
         if primary:
             logger.info(
@@ -562,6 +565,7 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
         result = {
             "current_page": mgr.current_page,
             "total_pages": mgr.total_pages,
+            "is_sleeping": mgr.is_sleeping,
             "keys": [
                 {
                     "key_id": k.key_id,
@@ -623,19 +627,23 @@ class SimulatorHTTPHandler(BaseHTTPRequestHandler):
             mgr.next_page()
             logger.info("Simulator: Navigated to next page (current: %d)", mgr.current_page)
         elif key_id == "summary_hub":
-            primary = mgr.get_primary_session()
-            if primary:
-                focused = focuser.focus_session(
-                    workspace_uris=primary.workspace_uris,
-                    title=primary.title,
-                )
-                action_result["session"] = primary.title
-                action_result["focused"] = focused
-                logger.info(
-                    "Simulator: Focused primary session '%s' (success=%s)",
-                    primary.title,
-                    focused,
-                )
+            if mgr.is_sleeping:
+                action_result["info"] = "スリープ中のためフォーカスをスキップしました"
+                logger.info("Simulator: Hub pressed while sleeping; skipping window focus.")
+            else:
+                primary = mgr.get_primary_session()
+                if primary:
+                    focused = focuser.focus_session(
+                        workspace_uris=primary.workspace_uris,
+                        title=primary.title,
+                    )
+                    action_result["session"] = primary.title
+                    action_result["focused"] = focused
+                    logger.info(
+                        "Simulator: Focused primary session '%s' (success=%s)",
+                        primary.title,
+                        focused,
+                    )
         elif key_id.startswith("session_slot_"):
             slot_part = key_id.replace("session_slot_", "")
             if slot_part.isdigit():

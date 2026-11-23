@@ -103,6 +103,7 @@ install_plugin.bat --uninstall
 - `Next Page`: 次ページキー
 - `Session 1` 〜 `Session 5`: 各セッションスロット
 - `Gemini 5-Hour Limit` / `Gemini Weekly Limit` / `Claude/GPT 5-Hour Limit` / `Claude/GPT Weekly Limit` / `Argon Weekly Limit`: レートリミット表示
+- `Monitor Mode (Tracking / Sleep)`: 監視モード（追跡中 / スリープ中）のワンタップ切り替え
 
 #### 2. ブラウザ版シミュレータでの動作確認
 ```bash
